@@ -158,6 +158,8 @@ class PromotionsTest(unittest.TestCase):
                 return {"content":[{"type":"PRODUCT","id":"MLB987","position":1}]}
             if path=="/products/MLB987":
                 return {"status":"active","buy_box_winner":None}
+            if path.startswith("/sites/MLB/search?category="):
+                return {"results": []}
             raise AssertionError(path)
         with patch.object(main,"ml_api",side_effect=fake_api):
             result=main.import_category("MLB432825")
@@ -225,6 +227,8 @@ class PromotionsTest(unittest.TestCase):
             if path=="/products/MLB90200":
                 return {"status":"active","buy_box_winner":None,
                         "children_ids":[]}
+            if path.startswith("/sites/MLB/search?category="):
+                return {"results": []}
             raise AssertionError(path)
         with patch.object(main,"ml_api",side_effect=fake_api):
             result=main.import_category("MLB1055")
@@ -242,6 +246,8 @@ class PromotionsTest(unittest.TestCase):
                 return {"content":[{"type":"USER_PRODUCT","id":"MLBU123","position":1}]}
             if path=="/user-products/MLBU123":
                 raise HTTPError("https://api.mercadolibre.com",403,"Forbidden",{},None)
+            if path.startswith("/sites/MLB/search?category="):
+                return {"results": []}
             raise AssertionError(path)
         with patch.object(main,"ml_api",side_effect=fake_api):
             result=main.import_category("MLB432825")
@@ -264,6 +270,61 @@ class PromotionsTest(unittest.TestCase):
             result = main.import_category("MLB432825")
         self.assertEqual(result["promotions"], 1)
         self.assertEqual(result["checked"], 1)
+
+    def test_category_search_fallback_finds_listings_when_ranking_has_no_winner(self):
+        calls = []
+        def fake_api(path):
+            calls.append(path)
+            if path == "/categories/MLB1055":
+                return {"name": "Celulares", "children_categories": []}
+            if path == "/highlights/MLB/category/MLB1055":
+                return {"content": [{"type": "PRODUCT", "id": "MLB1009"}]}
+            if path == "/products/MLB1009":
+                return {"status": "active", "buy_box_winner": None, "pickers": []}
+            if path == "/sites/MLB/search?category=MLB1055&limit=20":
+                return {"results": [
+                    {"id": "MLB8080"}, {"id": "MLB8080"}, {"id": "MLB9090"},
+                    {"id": "INVALID"}
+                ]}
+            if path in ("/items/MLB8080", "/items/MLB9090"):
+                return self.item()
+            if path == "/items/MLB8080/sale_price?context=channel_marketplace":
+                return self.sale(70, 100)
+            if path == "/items/MLB9090/sale_price?context=channel_marketplace":
+                return self.sale(98, 100)
+            raise AssertionError(path)
+        with patch.object(main, "ml_api", side_effect=fake_api):
+            result = main.import_category("MLB1055")
+        self.assertTrue(result["category_search_attempted"])
+        self.assertEqual(result["category_search_returned"], 2)
+        self.assertEqual(result["category_search_checked"], 2)
+        self.assertEqual(result["promotions"], 1)
+        self.assertEqual(result["without_discount"], 1)
+        self.assertIn("NAO necessariamente mais vendidos", result["message"])
+        self.assertEqual(calls.count("/items/MLB8080"), 1)
+        with main.db() as conn:
+            rows = conn.execute("SELECT id,is_promo,affiliate_url FROM products ORDER BY id").fetchall()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(sum(row["is_promo"] for row in rows), 1)
+            self.assertTrue(all(row["affiliate_url"] is None for row in rows))
+
+    def test_category_search_fallback_handles_403_without_false_promotion(self):
+        from urllib.error import HTTPError
+        def fake_api(path):
+            if path.startswith("/categories/"):
+                return {"name":"Celulares","children_categories":[]}
+            if path.startswith("/highlights/"):
+                return {"content":[{"type":"PRODUCT","id":"MLB800"}]}
+            if path == "/products/MLB800":
+                return {"status":"active","buy_box_winner":None}
+            if path.startswith("/sites/MLB/search?"):
+                raise HTTPError(path,403,"Forbidden",{},None)
+            raise AssertionError(path)
+        with patch.object(main,"ml_api",side_effect=fake_api):
+            result = main.import_category("MLB1055")
+        self.assertEqual(result["checked"],0)
+        self.assertEqual(result["promotions"],0)
+        self.assertEqual(result["category_search_error"], "Busca por categoria: HTTP 403")
 
     def test_valid_affiliate_domains(self):
         self.assertTrue(main.allowed_affiliate_link("https://mercadolivre.com/sec/abc"))
