@@ -3,9 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f4511e">
+<meta name="theme-color" content="#e84020">
+<meta name="color-scheme" content="light">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="pt_BR">
+<meta property="og:title" content="OFERTIX — Encontre ofertas de lojas parceiras">
+<meta property="og:description" content="Pesquise produtos, encontre descontos e compre diretamente nas lojas parceiras através de links de afiliados.">
 <meta name="description" content="OFERTIX reúne ofertas de lojas parceiras para você pesquisar produtos, comparar preços informados e comprar diretamente na loja.">
-<title>OFERTIX | Ofertas e promoções de lojas parceiras</title>
+<title>OFERTIX — Promoções e ofertas de lojas parceiras</title>
 <style>
 :root{
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
@@ -300,9 +305,130 @@ main{padding-top:12px}
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
+
+/* V16 — acabamento editorial e conversão sem dados artificiais */
+:root{--brand:#ed4728;--brand-deep:#c72b14;--paper:#fff;--ink:#242b34;--border:#ebedf0;--shadow:0 13px 34px rgba(28,32,42,.065)}
+body{color:var(--ink);background:#f5f6f8}
+.skip-link{position:absolute;left:20px;top:-100px;z-index:100;background:#fff;color:#9d311a;padding:13px;border-radius:9px}
+.skip-link:focus{top:10px}
+.visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+html{scroll-padding-top:155px}
+.site-header{box-shadow:0 9px 25px rgba(143,51,24,.16)}
+.brand{gap:12px}
+.logo-bag{background:#ffffff27;border:1px solid #ffffff44;padding:6px;border-radius:13px}
+.search-wrap{box-shadow:0 7px 20px rgba(75,28,7,.15);border-radius:9px}
+#search{font-size:15px}
+#search::placeholder{color:#94979a}
+.search-action{border-radius:7px;font-size:25px}
+.subnav{border-bottom:1px solid #e9e9ed;box-shadow:0 2px 10px #30354509}
+.subnav a{transition:color .18s}
+.hero{border-radius:16px;box-shadow:0 18px 35px #ec6a2d24;isolation:isolate}
+.hero-text{padding:32px 20px 27px 32px}
+.hero h1{font-size:clamp(28px,3.15vw,43px);letter-spacing:-.9px;line-height:1.11}
+.hero p{font-size:13px}
+.hero::after{content:"";position:absolute;width:370px;height:370px;top:-225px;right:22%;border-radius:50%;border:2px solid #fff3;pointer-events:none}
+.hero-art{overflow:hidden}
+.hero-bag{z-index:2;transform:rotate(-5deg) translateY(10px)}
+.hero-bag strong{background:#075b34d9;border:2px solid #b5ff85;padding:7px 16px;border-radius:14px;font-size:29px;letter-spacing:-.9px;box-shadow:0 8px 19px #00412363}
+.bag-illustration{display:block;width:min(250px,100%);height:200px;filter:drop-shadow(0 14px 6px #7a381877)}
+.hero-tag{right:8px;top:13px;padding:11px 16px}
+.hero-feature{border:1px solid #ffffffba;box-shadow:0 4px 14px #cd772027}
+.perks{border-radius:12px;box-shadow:var(--shadow);background:#fff;gap:0}
+.perk{border-right:1px solid var(--border);padding:14px 19px}
+.perk:last-child{border-right:0}
+.perk strong{font-size:13px}
+.perk small{font-size:11px}
+.section-title h2{font-size:21px}
+.categories-section{margin-top:29px}
+.category-grid{gap:9px;background:none;border:0;overflow:visible}
+.cat-chip{border-radius:12px;min-height:112px;border:1px solid #eceef1;box-shadow:0 4px 13px #30354508}
+.cat-chip:hover,.cat-chip.active{border-color:#ffb39a;transform:translateY(-2px)}
+.cat-chip .emoji{background:linear-gradient(130deg,#fff1e8,#fff9f2);font-size:26px}
+.cat-chip .cat-title{font-size:12px;font-weight:750}
+.featured-section{border-radius:14px;padding:0 16px 18px;border:1px solid #eee;box-shadow:var(--shadow)}
+.featured-head{padding:19px 4px 15px}
+.featured-head h2{font-size:22px}
+.featured-head span{font-size:12px}
+.partner-grid{border-radius:13px;box-shadow:var(--shadow);border:1px solid #eff0f2;padding:15px;gap:10px}
+.partner-card{border-radius:10px;transition:box-shadow .18s,transform .18s}
+.partner-card:hover{transform:translateY(-2px);box-shadow:0 8px 16px #d66c3320}
+.cards{gap:12px}
+.card{border-radius:12px;border-color:#e7e9ed;box-shadow:0 5px 15px #20242c09;overflow:hidden}
+.card:hover{transform:translateY(-4px);box-shadow:0 13px 23px #1c273520}
+.media{background:linear-gradient(150deg,#fff,#f8f9fb);border-bottom:1px solid #f0f1f4}
+.media img{padding:12px}
+.discount-badge{background:#dc361a;border-radius:6px;letter-spacing:.15px}
+.info{padding:12px}
+.info h3{font-size:13px;font-weight:700;line-height:1.45}
+.shop{color:#68727e;font-weight:700}
+.old{color:#8b8e92}
+.price{font-size:22px;color:#e63f21}
+.source{min-height:48px;border:1px solid #f6e5d0;background:#fffbf4;border-radius:7px;color:#7f6443}
+.btn{border-radius:7px;padding:12px;background:#ed4927;transition:background .18s}
+.btn:hover{background:#c92c11}
+.share-offer{font-size:11px;background:transparent;border:1px solid #e5e8ed;color:#5d6570;font-weight:750;padding:9px 8px;width:100%;border-radius:6px;margin-top:7px}
+.share-offer:hover{background:#fff3ef;border-color:#f7ae9e;color:#cf4326}
+.no-results{display:flex;flex-direction:column;align-items:center;gap:10px;line-height:1.5}
+.empty-icon{background:#fff2e9;border-radius:50%;padding:11px 13px;font-size:23px}
+.empty-heading{font-weight:850;font-size:17px;color:#30343e}
+.empty-description{font-size:13px;color:#68727e;max-width:500px}
+.clear-filters{margin-top:8px;padding:10px 16px;border-radius:7px;background:var(--brand);border:0;color:#fff;font-weight:750}
+.promo-card{border-radius:12px;box-shadow:0 9px 17px #1c273519;transition:transform .15s}
+.promo-card:hover{transform:translateY(-3px)}
+.deals-heading{border-radius:12px 12px 0 0}
+.filters{border:1px solid #f0f0f0;gap:12px}
+.filters select{border-radius:7px}
+.how-it-works{background:#fff;border-radius:16px;box-shadow:var(--shadow);padding:28px;display:grid;grid-template-columns:1fr 1.6fr;gap:25px;margin:27px 0 0;border:1px solid #eff0f2}
+.how-eyebrow{color:#e74c2b;font-size:11px;font-weight:850;letter-spacing:1.4px}
+.how-intro h2{font-size:24px;line-height:1.22;margin:12px 0}
+.how-intro p{font-size:13px;line-height:1.7;color:#68727e}
+.how-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:center}
+.how-step{padding:16px 12px;background:#fafbfc;border:1px solid #eceef2;border-radius:12px;min-height:166px}
+.step-num{display:block;font-size:27px;font-weight:850;color:#fa5e38;letter-spacing:-1.5px;margin-bottom:15px}
+.how-step strong{display:block;font-size:12px}
+.how-step small{display:block;font-size:11px;color:#64707b;line-height:1.55;margin-top:8px}
+.disclosure{background:#fffbf5;border-radius:11px}
+.site-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);max-width:min(95vw,460px);background:#29343d;color:white;padding:13px 19px;border-radius:10px;box-shadow:0 15px 35px #0004;font-size:13px;font-weight:650;z-index:100}
+.site-toast[hidden]{display:none}
+footer{border-top:3px solid #f04b2a}
+@media(max-width:1020px){
+  .how-it-works{grid-template-columns:1fr}
+  .hero h1{font-size:clamp(25px,3vw,36px)}
+}
+@media(max-width:850px){
+ .hero-aside{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .how-steps{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  html{scroll-padding-top:130px}
+  .container{width:calc(100% - 22px)}
+  .hero{border-radius:12px}
+  .hero-text{padding:27px 23px}
+  .hero h1{font-size:29px}
+  .perks{gap:0}
+  .perk{padding:12px 9px;border-bottom:1px solid #f0f0f0}
+  .perk strong{font-size:11px}
+  .perk small{font-size:10px}
+  .category-grid{gap:7px}
+  .cat-chip{min-height:97px;padding:7px}
+  .cat-chip .emoji{font-size:21px}
+  .featured-section{padding:0 10px 12px}
+  .featured-head h2{font-size:18px}
+  .media{height:150px}
+  .price{font-size:19px}
+  .how-it-works{padding:20px;gap:12px}
+  .how-intro h2{font-size:22px}
+  .how-steps{grid-template-columns:1fr}
+  .how-step{min-height:0;padding:12px;display:grid;grid-template-columns:34px 1fr;gap:2px 10px;align-items:center}
+  .how-step .step-num{grid-row:1/3;margin:0;font-size:22px}
+  .how-step small{margin:0}
+}
+@media(prefers-reduced-motion:reduce){.cat-chip,.partner-card,.promo-card,.btn{transition:none!important;transform:none!important}}
+
 </style>
 </head>
 <body>
+<a class="skip-link" href="#ofertas">Pular para as ofertas</a>
 <div class="announcement">
   <div class="container announcement-inner">
     <span>⚡ Promoções de lojas parceiras &nbsp; | &nbsp; Compare preços &nbsp; | &nbsp; Compre diretamente nas lojas</span>
@@ -344,7 +470,22 @@ main{padding-top:12px}
       <div class="hero-burst"></div>
       <span class="hero-percent hero-percent-left">%</span>
       <span class="hero-percent hero-percent-right">%</span>
-      <div class="hero-bag"><div class="bag-symbol">🛍️</div><strong>OFERTI<span>X</span></strong></div>
+      <div class="hero-bag">
+        <svg class="bag-illustration" viewBox="0 0 230 224" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="ofertixBagGradient" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#16a66a"/><stop offset=".6" stop-color="#078748"/><stop offset="1" stop-color="#046037"/></linearGradient>
+            <linearGradient id="ofertixTagGradient" x1="0" x2="1"><stop stop-color="#d9ff70"/><stop offset="1" stop-color="#9beb3d"/></linearGradient>
+          </defs>
+          <path d="M41 70 Q41 57 55 57 H165 Q183 57 186 76 L198 184 Q200 197 185 200 H43 Q29 200 32 184Z" fill="url(#ofertixBagGradient)" stroke="#045c35" stroke-width="6"/>
+          <path d="M76 75 V54 A38 38 0 0 1 152 54 V75" fill="none" stroke="#daff71" stroke-width="12" stroke-linecap="round"/>
+          <path d="M78 76 V54 A36 36 0 0 1 150 54 V76" fill="none" stroke="#064b2d" stroke-width="4" stroke-linecap="round"/>
+          <path d="M149 86 L195 86 L216 108 L177 147 L141 111Z" fill="url(#ofertixTagGradient)" stroke="#08743d" stroke-width="5" stroke-linejoin="round"/>
+          <circle cx="158" cy="101" r="5" fill="#08743d"/>
+          <text x="176" y="123" text-anchor="middle" fill="#07552e" font-family="Arial,sans-serif" font-size="31" font-weight="900">%</text>
+          <path d="M55 140 Q108 153 165 140" fill="none" stroke="#d5ff90" stroke-width="4" opacity=".6"/>
+        </svg>
+        <strong>OFERTI<span>X</span></strong>
+      </div>
       <div class="hero-tag">ECONOMIZE<br><strong>COM OFERTAS</strong><br>DE VÁRIAS LOJAS</div>
     </div>
     <div class="hero-aside">
@@ -405,11 +546,25 @@ main{padding-top:12px}
       <span id="count" role="status">Consultando ofertas…</span>
     </div>
     <div id="cards" class="cards" aria-live="polite"></div>
+    <p id="filterFeedback" class="visually-hidden" role="status"></p>
+  </section>
+  <section class="how-it-works" aria-labelledby="how-title">
+    <div class="how-intro">
+      <span class="how-eyebrow">COMO FUNCIONA</span>
+      <h2 id="how-title">Comprar bem começa com uma boa pesquisa.</h2>
+      <p>O OFERTIX reúne oportunidades das lojas participantes. Você encontra o produto aqui e finaliza a compra diretamente na loja anunciante.</p>
+    </div>
+    <div class="how-steps">
+      <div class="how-step"><span class="step-num">01</span><strong>Encontre sua oferta</strong><small>Pesquise produtos ou navegue por categorias e lojas.</small></div>
+      <div class="how-step"><span class="step-num">02</span><strong>Confira os detalhes</strong><small>Valide o preço, o frete e a disponibilidade no site parceiro.</small></div>
+      <div class="how-step"><span class="step-num">03</span><strong>Compre diretamente</strong><small>A loja é responsável pelo pagamento, entrega e atendimento.</small></div>
+    </div>
   </section>
   <section id="transparencia" class="disclosure">
     <strong>Publicidade e transparência:</strong> o OFERTIX divulga produtos por links de afiliados e pode receber comissões por compras elegíveis. Os preços podem vir de feeds fornecidos pelas lojas, de consultas oficiais à API ou de cadastro manual; a origem aparece em cada produto. Valores anteriores e percentuais são informações disponibilizadas pela fonte, não garantias de menor preço histórico. Um asterisco (*) indica desconto não verificado automaticamente pela API de preços. Confira sempre preço, frete, estoque e condições diretamente no site da loja antes de comprar.
   </section>
 </main>
+<div id="siteToast" class="site-toast" role="status" aria-live="polite" hidden></div>
 <footer>
   <div class="container footer-inner">
     <div><strong>OFERTIX</strong><div>ENCONTRE. COMPARE. ECONOMIZE.</div></div>
