@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#103b2d">
-  <title>OFERTIX — Só promoções verificadas</title>
+  <title>OFERTIX — Ofertas e promoções</title>
   <style>
     :root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172f27;background:#f3f7f4}
     *{box-sizing:border-box}body{margin:0}
@@ -26,6 +26,8 @@
     .media{position:relative;height:180px;display:flex;justify-content:center;align-items:center;background:#f8fbf8}
     .media img{width:100%;height:100%;object-fit:contain;padding:14px}
     .off{position:absolute;left:12px;top:12px;background:#087640;color:white;font-size:14px;font-weight:900;padding:7px 10px;border-radius:10px}
+    .source{font-size:12px;color:#745423;background:#fff5d6;padding:8px 10px;border-radius:9px;line-height:1.4;margin-bottom:12px}
+    .expiry{font-size:11px;color:#65796c;margin-top:8px}
     .info{padding:17px;display:flex;flex-direction:column;flex:1}
     .category{font-size:12px;color:#52866b;font-weight:700}
     .info h3{font-size:16px;line-height:1.4;margin:10px 0 14px;flex:1}
@@ -39,11 +41,11 @@
   </style>
 </head>
 <body>
-<header><div><div class="brand">OFERT<span>IX</span></div><div class="subtitle">Só ofertas com desconto verificado</div></div><a href="#ofertas">Ver promoções ↓</a></header>
+<header><div><div class="brand">OFERT<span>IX</span></div><div class="subtitle">Ofertas verificadas e ofertas informadas pelo afiliado</div></div><a href="#ofertas">Ver promoções ↓</a></header>
 <main>
-  <section class="hero"><div><h1>As melhores oportunidades, num só lugar.</h1><p>Mostramos apenas produtos com redução de preço confirmada e direcionamos sua compra para a loja parceira.</p></div><div class="graphic" aria-hidden="true">🏷️</div></section>
+  <section class="hero"><div><h1>Ofertas para comparar e economizar.</h1><p>Encontre ofertas verificadas pela API e descontos informados pelo afiliado, sempre identificados. Confira os valores na loja antes de comprar.</p></div><div class="graphic" aria-hidden="true">🏷️</div></section>
   <div class="tools"><input type="search" id="search" placeholder="Pesquisar promoções..." aria-label="Pesquisar produtos"><select id="category" aria-label="Categoria"><option value="">Todas as categorias</option></select></div>
-  <p class="notice"><strong>Transparência:</strong> o OFERTIX pode receber comissão pelas compras feitas por meio dos links de afiliado. Os descontos comparam preços informados pelo Mercado Livre, não garantem o menor valor histórico. Preços e disponibilidade podem mudar na loja.</p>
+  <p class="notice"><strong>Publicidade e transparência:</strong> o OFERTIX divulga links de afiliado e pode receber comissão por compras elegíveis. Algumas ofertas têm preços informados manualmente pelo afiliado, <strong>sem verificação automática pela API</strong>; cada card identifica sua origem. Confira preços, descontos, estoque e frete diretamente no Mercado Livre antes de finalizar a compra.</p>
   <div class="section-head"><h2 id="ofertas">Promoções disponíveis</h2><span id="count" role="status">Consultando ofertas…</span></div>
   <div id="cards" class="cards" aria-live="polite"></div>
 </main>
@@ -64,16 +66,23 @@ function render(){
   $("count").textContent=showing.length+" promoção(ões)";
   $("cards").replaceChildren();
   if(!showing.length){
-    $("cards").append(element("div","empty",products.length?"Nenhuma promoção encontrada com esses filtros.":"Não há promoções verificadas com links de afiliado neste momento. Volte mais tarde."));
+    $("cards").append(element("div","empty",products.length?"Nenhuma promoção encontrada com esses filtros.":"Não há ofertas com links de afiliado neste momento. Volte mais tarde."));
     return;
   }
   for(const p of showing){
     const card=element("article","card"), visual=element("div","media"), body=element("div","info");
-    const off=element("span","off",Math.floor(Number(p.discount_percent))+"% OFF");
+    const off=element("span","off",Math.floor(Number(p.discount_percent))+"% OFF"+(p.pricing_source==="manual"?"*":""));
     visual.append(off);
-    if(p.image && /^https:\/\//i.test(p.image)){const img=element("img");img.src=p.image;img.alt=p.title;img.loading="lazy";visual.append(img);}
+    if(p.image && (/^https:\/\//i.test(p.image)||/^data:image\/(jpeg|png|webp);base64,/i.test(p.image))){const img=element("img");img.src=p.image;img.alt=p.title;img.loading="lazy";visual.append(img);}
     else visual.append(element("span","", "🛍️"));
-    body.append(element("div","category",p.category||"Mercado Livre"),element("h3","",p.title),element("div","old",brl(p.original_price)),element("div","price",brl(p.price)));
+    body.append(element("div","category",p.category||"Mercado Livre"),element("h3","",p.title));
+    if(p.pricing_source==="manual"){
+      body.append(element("div","source","Preço e desconto informados pelo afiliado; não verificados pela API."));
+    }else{
+      body.append(element("div","source","Desconto verificado pela API na última consulta."));
+    }
+    body.append(element("div","old",brl(p.original_price)),element("div","price",brl(p.price)));
+    if(p.pricing_source==="manual"&&p.expires_at){body.append(element("div","expiry","Oferta cadastrada até "+new Date(p.expires_at).toLocaleString("pt-BR")+". Confira o preço na loja."));}
     const buy=element("a","btn","Comprar no Mercado Livre →");
     buy.href=p.affiliate_url;buy.target="_blank";buy.rel="sponsored noopener noreferrer";
     body.append(buy);card.append(visual,body);$("cards").append(card);
