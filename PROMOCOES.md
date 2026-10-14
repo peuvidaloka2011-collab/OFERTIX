@@ -36,7 +36,7 @@ Variáveis de ambiente:
 - OFERTIX_SYNC_HOURS: intervalo de verificação enquanto o servidor estiver ativo, padrão 6.
 - PORT: fornecido automaticamente pela hospedagem.
 
-O servidor consulta as categorias configuradas e revalida até 100 produtos com links cadastrados por ciclo. O admin permite importação manual por categoria. Só itens do tipo ITEM são importados; PRODUCT e USER_PRODUCT ainda não são resolvidos nesta versão.
+O servidor consulta as categorias configuradas e revalida até 100 produtos com links cadastrados por ciclo enquanto estiver ativo. O admin permite importar categorias, mas o Mercado Livre pode bloquear a busca por anúncios com HTTP 403. A V8 também permite cadastrar um anúncio e seu link oficial de afiliado sem importação por categoria.
 
 ## Links de afiliado
 
@@ -101,6 +101,21 @@ Cada anuncio encontrado e consultado por /items/ID e /items/ID/sale_price?contex
 A API pode recusar o endpoint de busca por categoria em algumas contas/permissoes (HTTP 403/401). O painel exibe a falha e nao inventa ofertas. Se os metodos falharem, conferir documentacao e alternativas autorizadas. Nao usar scraping de Mercado Livre para contornar bloqueios.
 
 Nota: V7 usa SQLite temporario do Render Free. Cada novo deploy pode apagar o token OAuth e links associados. Migrar para banco persistente antes de operacao real.
+## V8: cadastrar anúncios manualmente com links oficiais
+
+Objetivo: manter o Mercado Livre ativo enquanto a Shopee não libera sua Open API. A busca por anúncios por categoria retornou HTTP 403, portanto não depender dela para o cadastro inicial.
+
+No painel /admin:
+1. Gere o link para o anúncio específico no Gerador de Links da Central de Afiliados ou na Barra de Afiliados do Mercado Livre.
+2. Copie o ID do anúncio de venda (MLB seguido de números). O ID do produto de catálogo não serve.
+3. Preencha ID + link e toque em **Salvar e verificar oferta**. Não precisa executar a importação por categoria.
+4. O sistema tentará GET /items/{ID} e GET /items/{ID}/sale_price?context=channel_marketplace.
+5. Se encontrar produto ativo e desconto real de pelo menos 10%, o item poderá aparecer na vitrine; sem desconto confirmado não aparece.
+6. Se não houver autorização OAuth ou a API retornar HTTP 403/indisponibilidade, salva apenas o link com estado pendente e **não publica** o item. Pode tentar revalidar depois.
+
+Importante: um domínio como meli.la ou mercadolivre.com não comprova vínculo a uma conta de afiliado. Confirme que o link foi realmente gerado pela Central/Barra oficial e corresponde ao mesmo anúncio MLB. Links comuns de categorias, buscas ou página inicial não são elegíveis para comissão.
+
+O Render Free utiliza SQLite efêmero; reinicializações/deploy podem apagar links e tokens. Migrar para banco persistente ANTES da operação comercial. A revalidação periódica não é contínua em instâncias que hibernam.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
