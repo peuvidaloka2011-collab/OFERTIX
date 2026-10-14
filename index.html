@@ -300,6 +300,36 @@ main{padding-top:12px}
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
+
+/* V17 Carraro BR: catalogo completo independente das promocoes */
+.carraro-section{margin-top:28px;background:#fff;border-radius:12px;padding:22px;border:1px solid #ecedef}
+.carraro-heading{display:flex;gap:14px;align-items:center;justify-content:space-between;margin-bottom:10px}
+.carraro-heading h2{font-size:24px;margin:6px 0;color:#273f32}
+.carraro-heading p{font-size:13px;line-height:1.55;color:#687078}
+.carraro-eyebrow{display:inline-block;font-size:11px;font-weight:850;letter-spacing:1.3px;color:#1c815b}
+.carraro-count{color:#12633f;background:#eff9f2;border-radius:30px;padding:10px 15px;font-size:12px;font-weight:750;white-space:nowrap}
+.carraro-note{border-left:3px solid #39a37b;background:#f5faf7;padding:10px 13px;color:#52685b;font-size:12px;line-height:1.5;margin-bottom:18px}
+.carraro-card .media{background:#fff}
+.carraro-card .price{color:#24543a}
+.carraro-card .source{background:#f3f8f5;color:#4a6052;min-height:40px}
+.carraro-card .badge-unavailable{position:absolute;left:7px;top:7px;background:#eceff1;color:#555d63;padding:6px 9px;border-radius:6px;font-size:11px;font-weight:800}
+.carraro-card.is-unavailable{opacity:.82}
+.carraro-card .unavailable-text{background:#e9edef;color:#616970;padding:11px;border-radius:5px;text-align:center;font-size:12px;font-weight:800}
+.carraro-pagination{display:flex;align-items:center;justify-content:center;gap:15px;margin-top:20px}
+.carraro-pagination[hidden]{display:none}
+.carraro-pagination button{border:1px solid #cfded3;background:#fff;padding:11px 18px;border-radius:8px;color:#21573c;font-weight:800;cursor:pointer}
+.carraro-pagination button:hover:not(:disabled){border-color:#359267;background:#f0f9f3}
+.carraro-pagination button:disabled{opacity:.4;cursor:not-allowed}
+.carraro-pagination span{font-size:13px;color:#5d6662;font-weight:700}
+@media(max-width:650px){
+ .carraro-section{padding:13px}
+ .carraro-heading{flex-wrap:wrap}
+ .carraro-heading h2{font-size:20px}
+ .carraro-count{white-space:normal}
+ .carraro-pagination{gap:8px}
+ .carraro-pagination button{padding:9px;font-size:11px}
+ .carraro-pagination span{font-size:11px}
+}
 </style>
 </head>
 <body>
@@ -329,6 +359,7 @@ main{padding-top:12px}
     <a href="#ofertas-do-dia">🔥 &nbsp; Ofertas do dia</a>
     <a href="#ofertas">🏷️ &nbsp; Promoções</a>
     <a href="#lojas">🏬 &nbsp; Lojas parceiras</a>
+    <a href="#carraro">🪑 &nbsp; Carraro BR</a>
     <a href="#transparencia">❔ &nbsp; Como funciona</a>
   </div>
 </nav>
@@ -406,6 +437,23 @@ main{padding-top:12px}
     </div>
     <div id="cards" class="cards" aria-live="polite"></div>
   </section>
+  <section id="carraro" class="carraro-section" aria-labelledby="carraro-title">
+    <div class="carraro-heading">
+      <div>
+        <span class="carraro-eyebrow">LOJA PARCEIRA • MÓVEIS E CASA</span>
+        <h2 id="carraro-title">🪑 Catálogo Carraro BR</h2>
+        <p>Encontre móveis, mesas, cadeiras e muito mais. Preços informados pela loja, sem desconto presumido.</p>
+      </div>
+      <span class="carraro-count" id="carraroCount" role="status">Carregando catálogo…</span>
+    </div>
+    <div class="carraro-note">Você compra diretamente na Carraro por um link de afiliado. Confira o preço e a disponibilidade no site da loja antes de finalizar.</div>
+    <div id="carraroCards" class="cards" aria-live="polite"></div>
+    <div class="carraro-pagination" id="carraroPagination" hidden>
+      <button id="carraroPrev" type="button">← Anterior</button>
+      <span id="carraroPageInfo" aria-live="polite">Página 1</span>
+      <button id="carraroNext" type="button">Próxima →</button>
+    </div>
+  </section>
   <section id="transparencia" class="disclosure">
     <strong>Publicidade e transparência:</strong> o OFERTIX divulga produtos por links de afiliados e pode receber comissões por compras elegíveis. Os preços podem vir de feeds fornecidos pelas lojas, de consultas oficiais à API ou de cadastro manual; a origem aparece em cada produto. Valores anteriores e percentuais são informações disponibilizadas pela fonte, não garantias de menor preço histórico. Um asterisco (*) indica desconto não verificado automaticamente pela API de preços. Confira sempre preço, frete, estoque e condições diretamente no site da loja antes de comprar.
   </section>
@@ -443,6 +491,9 @@ const categoryGroups=[
  {key:"moda",name:"Moda",icon:"👕",terms:["moda","roupa","vestido","sapato","calcado","camiseta"]}
 ];
 let products=[];
+let carraroProducts=[];
+let carraroPage=1;
+const CARRARO_PAGE_SIZE=48;
 let selectedGroup="";
 function safeAffiliateURL(url){
   try{
@@ -477,14 +528,14 @@ function renderCategories(){
       $("category").value="";
       renderCategories();
       render();
-      $("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
+      $(name==="Carraro BR"?"carraro":"ofertas").scrollIntoView({behavior:"smooth",block:"start"});
     });
     grid.append(button);
   }
 }
 function renderPartners(){
   const grid=$("partnerGrid");grid.replaceChildren();
-  const names=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  const names=[...new Set([...products,...carraroProducts].map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
   if(!names.length){
     grid.append(element("div","partner-empty","Novas lojas aparecerão aqui quando houver ofertas disponíveis e links de afiliado autorizados."));
     return;
@@ -494,7 +545,7 @@ function renderPartners(){
     card.type="button";
     const logo=element("span","partner-mark",name.slice(0,1).toUpperCase());
     const info=element("span","partner-text");
-    info.append(element("span","partner-name",name),element("small","",products.filter(p=>(p.merchant||"Mercado Livre")===name).length+" oferta(s)"));
+    info.append(element("span","partner-name",name),element("small","",[...products,...carraroProducts].filter(p=>(p.merchant||"Mercado Livre")===name).length+" produto(s)"));
     card.append(logo,info);
     card.addEventListener("click",()=>{
       $("merchant").value=name;selectedGroup="";
@@ -543,6 +594,74 @@ function renderFeatured(){
   }
   for(const p of list)grid.append(makeProductCard(p));
 }
+
+function createCarraroCard(p){
+  const card=element("article","card carraro-card"+(p.in_stock?"":" is-unavailable"));
+  const media=element("div","media");
+  if(typeof p.image==="string"&&/^https:\/\//i.test(p.image)){
+    const img=element("img");
+    img.src=p.image;
+    img.alt="Foto do produto "+p.title;
+    img.loading="lazy";
+    img.addEventListener("error",()=>media.replaceChildren(element("span","fallback","🪑")),{once:true});
+    media.append(img);
+  }else media.append(element("span","fallback","🪑"));
+  if(!p.in_stock)media.append(element("span","badge-unavailable","Indisponível"));
+  const info=element("div","info");
+  info.append(element("div","shop","Carraro BR"),element("h3","",p.title));
+  const pricing=element("div","pricing");
+  pricing.append(element("div","price",brl(p.price)));
+  pricing.append(element("div","source","Preço informado pela loja · Sem desconto confirmado."));
+  if(p.in_stock){
+    const buy=element("a","btn","Ver na Carraro →");
+    buy.href=safeAffiliateURL(p.affiliate_url);
+    buy.target="_blank";buy.rel="sponsored noopener noreferrer";
+    pricing.append(buy);
+  }else{
+    pricing.append(element("div","unavailable-text","Sem estoque no momento"));
+  }
+  info.append(pricing);card.append(media,info);
+  return card;
+}
+function filterCarraro(){
+  const query=normalize($("search").value.trim());
+  const category=$("category").value;
+  const merchant=$("merchant").value;
+  const filtered=carraroProducts.filter(p=>{
+    const text=normalize((p.title||"")+" "+(p.category||"")+" "+p.merchant);
+    return text.includes(query)&&(!category||p.category===category)&&
+      (!merchant||merchant==="Carraro BR")&&belongsToGroup(p,selectedGroup);
+  });
+  const sort=$("sort").value;
+  filtered.sort((a,b)=>{
+    // Mantem os itens em estoque primeiro.
+    if(a.in_stock!==b.in_stock)return a.in_stock?-1:1;
+    if(sort==="low")return a.price-b.price;
+    if(sort==="high")return b.price-a.price;
+    return String(a.title).localeCompare(String(b.title),"pt-BR");
+  });
+  return filtered;
+}
+function renderCarraro(resetPage=false){
+  if(resetPage)carraroPage=1;
+  const filtered=filterCarraro();
+  const pageCount=Math.max(1,Math.ceil(filtered.length/CARRARO_PAGE_SIZE));
+  carraroPage=Math.max(1,Math.min(carraroPage,pageCount));
+  const box=$("carraroCards");
+  box.replaceChildren();
+  $("carraroCount").textContent=filtered.length+" produto(s) no catálogo";
+  const start=(carraroPage-1)*CARRARO_PAGE_SIZE;
+  for(const p of filtered.slice(start,start+CARRARO_PAGE_SIZE))box.append(createCarraroCard(p));
+  if(!filtered.length){
+    box.append(element("div","empty",carraroProducts.length?
+      "Nenhum produto Carraro corresponde à pesquisa ou aos filtros.":
+      "O catálogo Carraro ainda não está disponível. Os produtos serão carregados quando a importação automática estiver ativada."));
+  }
+  $("carraroPagination").hidden=filtered.length<=CARRARO_PAGE_SIZE;
+  $("carraroPageInfo").textContent="Página "+carraroPage+" de "+pageCount;
+  $("carraroPrev").disabled=carraroPage===1;
+  $("carraroNext").disabled=carraroPage>=pageCount;
+}
 function render(){
   const query=normalize($("search").value.trim());
   const category=$("category").value;
@@ -560,6 +679,7 @@ function render(){
   });
   $("count").textContent=filtered.length+" produto(s)";
   const grid=$("cards");grid.replaceChildren();
+  renderCarraro(true);
   if(!filtered.length){
     const message=products.length?
       "Nenhuma oferta encontrada com esses filtros. Experimente outra categoria ou pesquisa.":
@@ -575,9 +695,20 @@ async function load(){
     if(!response.ok)throw new Error("Não foi possível consultar ofertas.");
     const data=await response.json();
     products=(Array.isArray(data.products)?data.products:[]).filter(canDisplay);
+    try{
+      const carraroResponse=await fetch("/api/carraro-products",{cache:"no-store"});
+      if(carraroResponse.ok){
+        const payload=await carraroResponse.json();
+        carraroProducts=(Array.isArray(payload.products)?payload.products:[]).filter(p=>
+          p&&p.merchant==="Carraro BR"&&typeof p.title==="string"&&
+          typeof p.in_stock==="boolean"&&Number.isFinite(Number(p.price))&&Number(p.price)>0&&
+          safeAffiliateURL(p.affiliate_url));
+      }
+    }catch(_){carraroProducts=[];}
     const oldCategory=$("category").value,oldMerchant=$("merchant").value;
-    const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-    const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const combined=[...products,...carraroProducts];
+    const categories=[...new Set(combined.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const merchants=[...new Set(combined.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
     $("category").replaceChildren(new Option("Todas as categorias",""),...categories.map(c=>new Option(c,c)));
     if(categories.includes(oldCategory))$("category").value=oldCategory;
     $("merchant").replaceChildren(new Option("Todas as lojas",""),...merchants.map(m=>new Option(m,m)));
@@ -589,8 +720,16 @@ async function load(){
     $("partnerGrid").replaceChildren(element("div","partner-empty","Não foi possível carregar as lojas parceiras."));
     $("featuredCards").replaceChildren(element("div","empty","As ofertas estão temporariamente indisponíveis."));
     $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente novamente mais tarde."));
+    $("carraroCount").textContent="Catálogo indisponível";
+    $("carraroCards").replaceChildren(element("div","empty","Não foi possível carregar o catálogo Carraro BR."));
   }
 }
+$("carraroPrev").addEventListener("click",()=>{
+  carraroPage=Math.max(1,carraroPage-1);renderCarraro();$("carraro").scrollIntoView({behavior:"smooth",block:"start"});
+});
+$("carraroNext").addEventListener("click",()=>{
+  carraroPage++;renderCarraro();$("carraro").scrollIntoView({behavior:"smooth",block:"start"});
+});
 $("search").addEventListener("input",render);
 $("searchSubmit").addEventListener("click",()=>{
   render();$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
