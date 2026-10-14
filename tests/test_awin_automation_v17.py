@@ -124,7 +124,7 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
                     server.shutdown();server.server_close()
                     main.DB=old_db;main.ADMIN_KEY=old_admin
 
-    def test_google_format_regular_items_never_claim_discount(self):
+    def test_google_format_publishes_only_real_promotions(self):
         from affiliate_feeds import parse_google_csv
         import csv
         import io
@@ -148,16 +148,13 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
         parsed=parse_google_csv(buffer.getvalue(),minimum_discount=10)
         self.assertEqual(parsed["scanned"],4)
         self.assertEqual(len(parsed["offers"]),1)
-        self.assertEqual(len(parsed["partner_products"]),2)
+        self.assertNotIn("partner_products",parsed)
         self.assertEqual(parsed["offers"][0]["discount_percent"],30)
-        self.assertNotIn("discount_percent",parsed["partner_products"][0])
         with patch("scripts.sync_awin_catalog.fetch_awin_feed",return_value=buffer.getvalue()):
             generated,_=generate("https://productdata.awin.com/datafeed/x")
         self.assertEqual(len(generated["products"]),1)
-        self.assertEqual(len(generated["partner_products"]),2)
+        self.assertNotIn("partner_products",generated)
         self.assertEqual(len(pac.read_catalog(generated)),1)
-        self.assertEqual(len(pac.read_partner_catalog(generated)),2)
-        self.assertFalse(pac.read_partner_catalog(generated)[0]["verified_discount"])
 
     def test_google_products_reject_usd_adults_and_no_links(self):
         from affiliate_feeds import parse_google_csv
@@ -181,7 +178,32 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
         for row in bad:writer.writerow(row)
         parsed=parse_google_csv(buf.getvalue())
         self.assertEqual(parsed["offers"],[])
-        self.assertEqual(parsed["partner_products"],[])
+
+
+    def test_carraro_feed_without_sale_price_produces_empty_catalog(self):
+        from affiliate_feeds import parse_google_csv
+        import csv
+        import io
+        header=["advertiser_id","advertiser_name","id","title","price","sale_price",
+                "availability","aw_deep_link","image_link"]
+        rows=[{"advertiser_id":"81383","advertiser_name":"Carraro BR","id":str(i),
+               "title":"Mesa para cozinha moderna","price":"549.90 BRL",
+               "sale_price":"","availability":"in_stock",
+               "aw_deep_link":"https://www.awin1.com/cread.php?awinmid=81383&awinaffid=111",
+               "image_link":"https://cdn.example.org/mesa.jpg"}
+              for i in range(5)]
+        buf=io.StringIO()
+        writer=csv.DictWriter(buf,fieldnames=header)
+        writer.writeheader();writer.writerows(rows)
+        parsed=parse_google_csv(buf.getvalue())
+        self.assertEqual(parsed["scanned"],5)
+        self.assertEqual(parsed["offers"],[])
+        with patch("scripts.sync_awin_catalog.fetch_awin_feed",return_value=buf.getvalue()):
+            result,scanned=generate("https://productdata.awin.com/datafeed/download/fid/81383")
+        self.assertEqual(scanned,5)
+        self.assertEqual(result["products"],[])
+        self.assertNotIn("partner_products",result)
+        self.assertEqual(pac.read_catalog(result),[])
 
     def test_http_failure_returns_expired_cache_as_empty(self):
         pac._CACHE.update(at=0.0,offers=[],expires_at=None)
