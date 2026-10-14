@@ -18,7 +18,7 @@ CATALOG_URL = (
 )
 MAX_CATALOG_BYTES = 5 * 1024 * 1024
 CACHE_SECONDS = 300
-_CACHE = {"at": 0.0, "offers": []}
+_CACHE = {"at": 0.0, "offers": [], "expires_at": None}
 _LOCK = threading.Lock()
 _ALLOWED_AFFILIATE_HOSTS = frozenset({"www.awin1.com", "awin1.com"})
 
@@ -114,9 +114,12 @@ def get_offers(min_discount=10):
     """Cacheia leitura da lista no GitHub por 5 min. Nunca envia segredo ao browser."""
     with _LOCK:
         now_mono = time.monotonic()
+        valid_cache = (_CACHE["expires_at"] is not None and
+                       datetime.now(timezone.utc) < _CACHE["expires_at"])
         if _CACHE["at"] and now_mono - _CACHE["at"] < CACHE_SECONDS:
-            return [x for x in _CACHE["offers"] if x["discount_percent"] >= min_discount]
+            return [x for x in _CACHE["offers"] if x["discount_percent"] >= min_discount] if valid_cache else []
         offers = []
+        expires_at = None
         try:
             req = urllib.request.Request(
                 CATALOG_URL,
@@ -126,11 +129,16 @@ def get_offers(min_discount=10):
                 raw = response.read(MAX_CATALOG_BYTES + 1)
             if len(raw) > MAX_CATALOG_BYTES:
                 raise ValueError("Catalogo excedeu o limite.")
-            offers = read_catalog(json.loads(raw.decode("utf-8")), min_discount=1)
+            payload = json.loads(raw.decode("utf-8"))
+            expires_at = _parse_utc(payload.get("expires_at")) if isinstance(payload, dict) else None
+            offers = read_catalog(payload, min_discount=1)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
                 OSError, ValueError, UnicodeError, json.JSONDecodeError):
             # Falha de rede: retorna cache anterior, se ainda nao estiver expirado;
             # a validade e avaliada a cada nova consulta periodica.
-            offers = _CACHE["offers"]
-        _CACHE.update(at=now_mono, offers=offers)
+            offers = _CACHE["offers"] if valid_cache else []
+            expires_at = _CACHE["expires_at"] if valid_cache else None
+        _CACHE.update(at=now_mono, offers=offers, expires_at=expires_at)
+        if expires_at is None or datetime.now(timezone.utc) >= expires_at:
+            return []
         return [x for x in offers if x["discount_percent"] >= min_discount]
