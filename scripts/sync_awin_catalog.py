@@ -23,6 +23,7 @@ def generate(urls, *, at=None, minimum_discount=10):
         raise ValueError("Configure de 1 a 8 URLs oficiais de feeds Awin.")
     at = at or datetime.now(timezone.utc)
     offers = {}
+    carraro = {}
     scanned = 0
     for url in links:
         feed = fetch_awin_feed(url)
@@ -34,14 +35,18 @@ def generate(urls, *, at=None, minimum_discount=10):
         scanned += parsed["scanned"]
         for item in parsed["offers"]:
             offers[item["id"]] = item
-        if len(offers) > 4000:
-            raise ValueError("Muitas promocoes. Reduza categorias/lojas nos feeds.")
+        for item in parsed.get("carraro_products", []):
+            carraro[item["id"]] = item
+        if len(offers)>4000 or len(carraro)>4000:
+            raise ValueError("Muitos produtos. Reduza categorias/lojas nos feeds.")
     selected = sorted(offers.values(), key=lambda row:row["discount_percent"], reverse=True)[:300]
+    carraro_list = sorted(carraro.values(), key=lambda row:row["title"].casefold())
     return {
         "version": 1,
         "generated_at": at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "expires_at": (at + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "products": selected,
+        "carraro_products": carraro_list,
     }, scanned
 
 
@@ -62,7 +67,8 @@ def main():
             encoding="utf-8",
         )
         print(f"OFERTIX: {scanned} entradas analisadas, "
-              f"{len(catalog['products'])} ofertas com desconto confirmado pelo feed.")
+              f"{len(catalog['products'])} promocoes e "
+              f"{len(catalog['carraro_products'])} produtos Carraro validos.")
         return 0
     except Exception:
         print("OFERTIX: importacao nao concluida. "
