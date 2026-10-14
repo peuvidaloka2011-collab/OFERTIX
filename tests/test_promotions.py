@@ -41,6 +41,48 @@ class PromotionsTest(unittest.TestCase):
         self.assertIsNone(main.verified_promotion(self.item(status="paused"), self.sale()))
         self.assertIsNone(main.verified_promotion(self.item(), self.sale(92, 100), threshold=10))
 
+    def test_catalog_diagnosis_reports_structure_without_secrets(self):
+        requested = []
+        def fake_api(path):
+            requested.append(path)
+            if path == "/categories/MLB1055":
+                return {"name": "Celulares", "children_categories": []}
+            if path == "/highlights/MLB/category/MLB1055":
+                return {"content": [
+                    {"id": "MLB7001", "type": "PRODUCT"},
+                    {"id": "MLB7002", "type": "PRODUCT"},
+                    {"id": "MLB7003", "type": "PRODUCT"},
+                    {"id": "MLB7004", "type": "PRODUCT"},
+                ]}
+            if path == "/products/MLB7001":
+                return {"status": "active", "buy_box_winner": {"item_id": "MLB8001"},
+                        "children_ids": [], "access_token": "MUST_NOT_EXPOSE"}
+            if path == "/products/MLB7002":
+                return {"status": "inactive", "buy_box_winner": None,
+                        "children_ids": ["MLB7999"], "parent_id": "MLB6000"}
+            if path == "/products/MLB7003":
+                return {"status": "active", "buy_box_winner": None,
+                        "pickers": [{"products": [{"product_id": "MLB7003"}, {"product_id": "MLB7004"}]}]}
+            raise AssertionError("unexpected path: " + path)
+        with patch.object(main, "ml_api", side_effect=fake_api):
+            result = main.diagnose_catalog("MLB1055")
+        self.assertEqual(result["ranking_count"], 4)
+        self.assertEqual(result["sample_size"], 3)
+        self.assertTrue(result["sample"][0]["buy_box_winner_has_item_id"])
+        self.assertEqual(result["sample"][1]["children_count"], 1)
+        self.assertEqual(result["sample"][2]["picker_options_count"], 2)
+        self.assertNotIn("MUST_NOT_EXPOSE", json.dumps(result))
+        self.assertNotIn("/products/MLB7004", requested)
+
+    def test_diagnosis_parent_category_skips_product_lookup(self):
+        with patch.object(main, "ml_api", return_value={
+            "name": "Categoria pai",
+            "children_categories": [{"id": "MLB1234", "name": "Filho"}]
+        }) as api:
+            data = main.diagnose_catalog("MLB1051")
+        self.assertFalse(data["is_final"])
+        api.assert_called_once_with("/categories/MLB1051")
+
     def test_parent_category_shows_subcategories_instead_of_failing(self):
         def fake_api(path):
             self.assertEqual(path, "/categories/MLB1051")
