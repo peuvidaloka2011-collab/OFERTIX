@@ -4,6 +4,9 @@ import importlib
 import json
 import os
 import tempfile
+import re
+import shutil
+import subprocess
 import threading
 import unittest
 from pathlib import Path
@@ -48,6 +51,21 @@ class PromotionsTest(unittest.TestCase):
         }
         data.update(changes)
         return data
+
+    def test_v12_frontend_javascript_is_syntax_valid(self):
+        node=shutil.which("node")
+        if not node:self.skipTest("Node.js nao instalado no ambiente.")
+        for name in ("admin.html","index.html"):
+            with self.subTest(file=name):
+                text=(Path(main.BASE)/name).read_text(encoding="utf-8")
+                found=re.search(r"<script>(.*?)</script>",text,re.S)
+                self.assertIsNotNone(found)
+                with tempfile.NamedTemporaryFile(mode="w",suffix=".js",encoding="utf-8") as js:
+                    js.write(found.group(1))
+                    js.flush()
+                    proc=subprocess.run([node,"--check",js.name],capture_output=True,text=True,timeout=15)
+                    self.assertEqual(proc.returncode,0,
+                        name+" tem erro de JavaScript: "+proc.stderr)
 
     def test_v12_manual_offer_without_oauth_appears_as_unverified(self):
         with patch.object(main, "ml_api") as api:
