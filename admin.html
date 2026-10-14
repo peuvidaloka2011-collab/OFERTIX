@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>OFERTIX • Administração</title>
+<style>
+:root{font-family:system-ui,Segoe UI,sans-serif;color:#193528;background:#f3f7f4}*{box-sizing:border-box}body{margin:0}
+header{padding:20px;background:#103b2d;color:white}header div,main{max-width:1050px;margin:auto}
+header strong{font-size:24px}header span{color:#74e6a5}
+main{padding:20px 16px 70px}
+.panel{background:white;border:1px solid #e2ece5;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 3px 14px #183c2510}
+.row{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.row input{flex:1;min-width:170px}
+input{border:1px solid #cadbd0;border-radius:10px;padding:12px;font:inherit;max-width:100%}
+button{cursor:pointer;background:#168c52;color:white;border:none;border-radius:10px;padding:12px 16px;font-weight:700}
+button:hover{background:#0a7240}button.secondary{background:#2f5140}
+button:disabled{opacity:.5;cursor:wait}
+h2{margin-top:0;font-size:21px}p{line-height:1.5}
+#message{white-space:pre-wrap;padding:12px;border-radius:10px;color:#205439;background:#e7f5eb}
+.muted{color:#687f71;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.stat{background:#eff8f0;border-radius:12px;padding:14px}.stat b{display:block;font-size:21px}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:11px;border-bottom:1px solid #e8eee9;text-align:left;vertical-align:middle}
+.table-scroll{overflow-x:auto}.tag{font-size:12px;padding:5px 8px;border-radius:8px;background:#e8f7ec;color:#116d3c;white-space:nowrap}.off{color:#159653;font-weight:bold}
+a{color:#09683d}#app{display:none}
+@media(max-width:600px){td,th{padding:8px 6px}table{min-width:620px}}
+</style></head><body>
+<header><div><strong>OFERT<span>IX</span></strong> · Painel de promoções</div></header>
+<main>
+<section class="panel" id="login"><h2>Acesso administrativo</h2><p>Entre com a chave <code>OFERTIX_ADMIN_KEY</code> configurada no servidor. Ela não é enviada ao GitHub.</p>
+<div class="row"><input id="key" type="password" placeholder="Senha administrativa" autocomplete="off"><button id="enter">Entrar</button></div>
+<p class="muted">Esta página não armazena a senha no navegador. Não compartilhe essa chave.</p></section>
+<p id="message" role="status">Aguardando acesso.</p>
+<div id="app">
+<section class="panel"><h2>Monitoramento</h2><div class="grid">
+<div class="stat">Produtos analisados<b id="total">—</b></div><div class="stat">Promoções publicadas<b id="published">—</b></div><div class="stat">Desconto mínimo<b id="min">—</b></div><div class="stat">Token da API<b id="token">—</b></div></div>
+<p class="muted" id="schedule"></p><button id="reload" class="secondary">Atualizar painel</button></section>
+<section class="panel"><h2>Importar produtos populares</h2><p>Informe o ID de uma categoria do Mercado Livre (por exemplo <code>MLB1051</code>). A verificação publica apenas os itens com desconto confirmado. Os links de afiliado precisam ser associados separadamente.</p>
+<div class="row"><input id="category" placeholder="ID da categoria (MLB...)" value="MLB1051" autocapitalize="characters"><button id="import">Importar e verificar</button><button id="refresh" class="secondary">Revalidar ofertas</button></div>
+<p class="muted">Para importar categorias automaticamente durante a execução, configure <code>OFERTIX_CATEGORIES</code> no Render, separando os IDs por vírgulas. No Render gratuito, o processo pode hibernar e não executar a tarefa no horário.</p></section>
+<section class="panel"><h2>Associar link de afiliado oficial</h2><p>Gere o URL na Central de Afiliados do Mercado Livre e cole aqui. Um link comum não garante comissão.</p>
+<div class="row"><input id="item" placeholder="ID do produto: MLB123456"><input id="link" type="url" placeholder="https://meli.la/..."><button id="save">Salvar link</button></div>
+<p class="muted">O produto só será visível na vitrine se a promoção continuar válida e o link estiver cadastrado.</p></section>
+<section class="panel"><h2>Produtos encontrados</h2><div class="table-scroll"><table><thead><tr><th>ID</th><th>Produto</th><th>Desconto</th><th>Status</th><th>Ação</th></tr></thead><tbody id="products"><tr><td colspan="5">Nenhum produto importado.</td></tr></tbody></table></div></section>
+</div>
+</main>
+<script>
+"use strict";
+let key="";
+const $=id=>document.getElementById(id);
+function info(v){$("message").textContent=typeof v==="string"?v:JSON.stringify(v,null,2);}
+async function request(path,options){
+  const res=await fetch(path,Object.assign({headers:{"X-Admin-Key":key,"Content-Type":"application/json"},cache:"no-store"},options||{}));
+  const data=await res.json();
+  if(!res.ok)throw Error(data.error||"Falha "+res.status);
+  return data;
+}
+async function load(){
+  const [s,p]=await Promise.all([request("/api/admin/status"),request("/api/admin/products")]);
+  $("app").style.display="block";$("login").style.display="none";
+  $("total").textContent=s.total;$("published").textContent=s.published;
+  $("min").textContent=s.min_discount+"%";$("token").textContent=s.token_configured?"Configurado":"Pendente";
+  $("schedule").textContent="Revalidação a cada "+s.refresh_every_hours+"h enquanto o servidor estiver ativo. Ofertas vencem após "+s.max_age_hours+"h. Categorias automáticas: "+(s.categories.join(", ")||"não configuradas")+"; última verificação: "+(s.last_sync.time||"ainda não realizada")+".";
+  $("products").replaceChildren();
+  if(!p.products.length){
+    const tr=document.createElement("tr"),td=document.createElement("td");td.colSpan=5;td.textContent="Nenhum produto importado.";tr.append(td);$("products").append(tr);return;
+  }
+  for(const item of p.products){
+    const tr=document.createElement("tr");
+    function cell(text){const td=document.createElement("td");td.textContent=text;return td;}
+    const id=cell(item.id),title=cell(item.title),disc=cell(item.discount_percent?Number(item.discount_percent).toFixed(1)+"%":"—");
+    const status=cell(item.is_promo?(item.affiliate_url?"Com link":"Aguardando link"):"Sem promoção");
+    const action=document.createElement("td"),button=document.createElement("button");
+    button.textContent="Selecionar";button.className="secondary";button.addEventListener("click",()=>{
+      $("item").value=item.id;$("link").value=item.affiliate_url||"";$("item").scrollIntoView({behavior:"smooth",block:"center"});
+    });
+    action.append(button);tr.append(id,title,disc,status,action);$("products").append(tr);
+  }
+}
+async function op(path,body,msg){
+  info("Processando, aguarde...");
+  try{const data=await request(path,{method:"POST",body:JSON.stringify(body)});info(msg+"\n"+JSON.stringify(data,null,2));await load();}
+  catch(e){info("Erro: "+e.message);}
+}
+$("enter").addEventListener("click",async()=>{
+  key=$("key").value.trim();
+  if(!key){info("Informe a senha.");return;}
+  try{await load();$("key").value="";info("Acesso autorizado.");}
+  catch(e){key="";info("Não foi possível entrar: "+e.message);}
+});
+$("import").addEventListener("click",()=>op("/api/admin/import",{category:$("category").value},"Importação concluída."));
+$("refresh").addEventListener("click",()=>op("/api/admin/refresh",{},"Revalidação concluída."));
+$("save").addEventListener("click",()=>op("/api/admin/link",{id:$("item").value,affiliate_url:$("link").value},"Link registrado."));
+$("reload").addEventListener("click",()=>load().catch(e=>info("Erro: "+e.message)));
+</script></body></html>
