@@ -1492,8 +1492,9 @@ class Handler(BaseHTTPRequestHandler):
                     row["pricing_source"] = "manual"
                     row["verified_discount"] = False
                 rows.extend(manual_rows)
-                rows.extend(public_affiliate_catalog.get_offers(PROMO_MIN))
-                rows.sort(key=lambda v: v.get("discount_percent") or 0, reverse=True)
+            # Nao reter o lock do SQLite enquanto consulta o catalogo publico no GitHub.
+            rows.extend(public_affiliate_catalog.get_offers(PROMO_MIN))
+            rows.sort(key=lambda v: v.get("discount_percent") or 0, reverse=True)
             return self.respond(200, {"products": rows[:300], "minimum_discount": PROMO_MIN})
         if path == "/api/admin/status":
             if not self.is_admin():
