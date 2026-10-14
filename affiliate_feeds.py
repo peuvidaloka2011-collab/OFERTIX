@@ -250,3 +250,81 @@ def run_sync(db_context, feed_url, minimum_discount=10):
         return {"state": "error", "message": LAST_SYNC["error"]}
     finally:
         SYNC_LOCK.release()
+
+
+def _google_price(raw):
+    """Formato Google/Awin: '333.32 BRL' (ou '333,32 BRL')."""
+    if not isinstance(raw, str):
+        return None, None
+    match = re.fullmatch(r"\s*(\d{1,7}(?:[.,]\d{1,2})?)\s+([A-Za-z]{3})\s*", raw)
+    if not match:
+        return None, None
+    number = _money(match.group(1))
+    return number, match.group(2).upper()
+
+
+def parse_google_csv(text, minimum_discount=10):
+    """Converte feeds Awin no esquema Google Merchant.
+
+    Sem sale_price: produto normal, jamais rotulado como promoção.
+    Preço em BRL, estoque real, imagem HTTPS e deep link rastreável obrigatórios.
+    """
+    if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_CSV_BYTES:
+        raise ValueError("Feed Google vazio ou acima do limite.")
+    reader = csv.DictReader(io.StringIO(text))
+    required = {"advertiser_id", "advertiser_name", "id", "title", "price",
+                "aw_deep_link", "image_link", "availability"}
+    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+        raise ValueError("Colunas Google Awin obrigatorias ausentes.")
+    discounts, standard = {}, {}
+    scanned=0
+    for row in reader:
+        scanned += 1
+        if scanned > MAX_ROWS:
+            raise ValueError("Feed muito grande; reduza os produtos selecionados.")
+        if not isinstance(row, dict) or None in row:
+            continue
+        if (row.get("adult") or "").strip().lower() in ("yes", "true", "1"):
+            continue
+        if (row.get("availability") or "").strip().lower() != "in_stock":
+            continue
+        regular_price, currency = _google_price(row.get("price"))
+        if regular_price is None or currency != "BRL":
+            continue
+        sale_raw=(row.get("sale_price") or "").strip()
+        sale_price, sale_currency = _google_price(sale_raw) if sale_raw else (None,None)
+        if sale_raw and (sale_price is None or sale_currency != "BRL"):
+            continue
+        if sale_price is not None and sale_price > regular_price:
+            continue
+        affiliate=(row.get("aw_deep_link") or "").strip()
+        image=(row.get("image_link") or "").strip()
+        if not _safe_url(affiliate,AWIN_LINK_HOSTS) or not _valid_image(image):
+            continue
+        merchant=(row.get("advertiser_name") or "").strip()[:70]
+        merchant_id=(row.get("advertiser_id") or "").strip()
+        product_id=(row.get("id") or "").strip()
+        title=(row.get("title") or "").strip()[:160]
+        if not merchant_id.isdigit() or not merchant or not product_id or len(product_id)>100 or len(title)<5:
+            continue
+        ident=hashlib.sha256((merchant_id+":"+product_id).encode("utf-8")).hexdigest()[:32]
+        category=(row.get("product_type") or row.get("google_product_category") or
+                  ("Móveis e Casa" if merchant.lower() == "carraro br" else "Produtos parceiros"))
+        category=str(category).strip()[:70] or "Produtos parceiros"
+        current=sale_price if sale_price is not None else regular_price
+        item={"id":ident,"merchant":merchant,"title":title,"category":category,
+              "price":round(current,2),"affiliate_url":affiliate,"image":image}
+        if sale_price is not None and sale_price < regular_price:
+            percentage=round((regular_price-sale_price)*100/regular_price,2)
+            if percentage >= minimum_discount:
+                discounts[ident]={**item,"original_price":regular_price,
+                                  "discount_percent":percentage}
+                continue
+        # Produto sem desconto confirmado, com preço atual fornecido pelo lojista.
+        standard[ident]=item
+        if len(discounts)+len(standard)>MAX_OFFERS:
+            raise ValueError("Feed possui mais produtos que o limite.")
+    if not scanned:
+        raise ValueError("Feed Google sem produtos.")
+    return {"scanned":scanned,"offers":list(discounts.values()),
+            "partner_products":list(standard.values())}
