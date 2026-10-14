@@ -124,6 +124,65 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
                     server.shutdown();server.server_close()
                     main.DB=old_db;main.ADMIN_KEY=old_admin
 
+    def test_google_format_regular_items_never_claim_discount(self):
+        from affiliate_feeds import parse_google_csv
+        import csv
+        import io
+        source={
+            "advertiser_id":"81383","advertiser_name":"Carraro BR","id":"sku-1",
+            "title":"Conjunto de cadeiras para jantar","price":"333.32 BRL",
+            "sale_price":"","availability":"in_stock",
+            "aw_deep_link":"https://www.awin1.com/cread.php?awinmid=81383&awinaffid=100",
+            "image_link":"https://imagens.example.com/cadeiras.jpg",
+            "product_type":"","google_product_category":"","adult":"",
+        }
+        buffer=io.StringIO()
+        writer=csv.DictWriter(buffer,fieldnames=list(source))
+        writer.writeheader()
+        writer.writerow(source)
+        writer.writerow({**source,"id":"sku-2","availability":"out_of_stock"})
+        writer.writerow({**source,"id":"sku-3","price":"300.00 BRL",
+                         "sale_price":"210.00 BRL"})
+        writer.writerow({**source,"id":"sku-4","price":"100.00 BRL",
+                         "sale_price":"95.00 BRL"})
+        parsed=parse_google_csv(buffer.getvalue(),minimum_discount=10)
+        self.assertEqual(parsed["scanned"],4)
+        self.assertEqual(len(parsed["offers"]),1)
+        self.assertEqual(len(parsed["partner_products"]),2)
+        self.assertEqual(parsed["offers"][0]["discount_percent"],30)
+        self.assertNotIn("discount_percent",parsed["partner_products"][0])
+        with patch("scripts.sync_awin_catalog.fetch_awin_feed",return_value=buffer.getvalue()):
+            generated,_=generate("https://productdata.awin.com/datafeed/x")
+        self.assertEqual(len(generated["products"]),1)
+        self.assertEqual(len(generated["partner_products"]),2)
+        self.assertEqual(len(pac.read_catalog(generated)),1)
+        self.assertEqual(len(pac.read_partner_catalog(generated)),2)
+        self.assertFalse(pac.read_partner_catalog(generated)[0]["verified_discount"])
+
+    def test_google_products_reject_usd_adults_and_no_links(self):
+        from affiliate_feeds import parse_google_csv
+        import io
+        import csv
+        source={"advertiser_id":"81383","advertiser_name":"Carraro BR","id":"x",
+                "title":"Mesa cozinha dobrável", "price":"500.00 BRL",
+                "sale_price":"","availability":"in_stock",
+                "aw_deep_link":"https://www.awin1.com/cread.php?x=1",
+                "image_link":"https://cdn.example.org/mesa.jpg"}
+        bad=[
+            {**source,"id":"1","price":"500.00 USD"},
+            {**source,"id":"2","adult":"yes"},
+            {**source,"id":"3","aw_deep_link":"https://example.org/item"},
+            {**source,"id":"4","availability":"out_of_stock"},
+            {**source,"id":"5","sale_price":"60.00 USD"},
+        ]
+        buf=io.StringIO()
+        writer=csv.DictWriter(buf,fieldnames=sorted({k for r in bad for k in r}))
+        writer.writeheader()
+        for row in bad:writer.writerow(row)
+        parsed=parse_google_csv(buf.getvalue())
+        self.assertEqual(parsed["offers"],[])
+        self.assertEqual(parsed["partner_products"],[])
+
     def test_http_failure_returns_expired_cache_as_empty(self):
         pac._CACHE.update(at=0.0,offers=[],expires_at=None)
         with patch("public_affiliate_catalog.urllib.request.urlopen",
