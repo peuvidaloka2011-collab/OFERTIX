@@ -178,6 +178,71 @@ def verify_and_save(item_id, category, ranking=999):
     return bool(promo)
 
 
+def register_affiliate_item(item_id, link):
+    """Registra link oficial para anuncio MLB, mesmo sem acesso a busca por categoria.
+
+    Nunca inventa preco ou desconto: se API nao responder, fica pendente e oculto.
+    A validade/rastreio do link de afiliado e responsabilidade do gerador oficial.
+    """
+    item_id = str(item_id).strip().upper()
+    link = str(link).strip()
+    if not VALID_ID.fullmatch(item_id):
+        raise ValueError("Informe o ID de anuncio MLB (exemplo: MLB1234567890), nao o produto de catalogo.")
+    if len(link) > 2048 or not allowed_affiliate_link(link):
+        raise ValueError("Cole um link HTTPS gerado no programa de afiliados do Mercado Livre.")
+    verified = False
+    promo = False
+    reason = None
+
+    # Evita colisao com importacao, revalidacao e salvamento simultaneo do mesmo item.
+    with IMPORT_LOCK:
+        if TOKEN or oauth_ml.connected(DB):
+            try:
+                promo = verify_and_save(item_id, category=None)
+                verified = True
+            except urllib.error.HTTPError as exc:
+                reason = "Consulta do anuncio recusada pela API (HTTP " + str(exc.code) + ")."
+            except (urllib.error.URLError, TimeoutError):
+                reason = "Nao foi possivel consultar o Mercado Livre neste momento."
+            except (oauth_ml.OAuthFlowError, oauth_ml.OAuthConfigError, RuntimeError):
+                reason = "Autorizacao da API indisponivel. Reconecte o Mercado Livre pelo painel."
+            except (ValueError, KeyError, TypeError):
+                reason = "A API retornou dados insuficientes para verificar o desconto."
+        else:
+            reason = "A conta Mercado Livre ainda nao esta conectada para consultar precos."
+
+        # Nao publicar desconto antigo se a tentativa de revalidacao falhar.
+        with db() as conn:
+            conn.execute(
+                """INSERT INTO products (id,title,affiliate_url,is_promo,discount_percent,updated_at)
+                   VALUES (?,?,?,0,0,CURRENT_TIMESTAMP)
+                   ON CONFLICT(id) DO UPDATE SET
+                     affiliate_url=excluded.affiliate_url,
+                     is_promo=CASE WHEN ? THEN products.is_promo ELSE 0 END,
+                     promo_checked_at=CASE WHEN ? THEN products.promo_checked_at ELSE NULL END,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (item_id, "Aguardando verificacao: " + item_id, link,
+                 1 if verified else 0, 1 if verified else 0),
+            )
+
+    return {
+        "ok": True,
+        "id": item_id,
+        "checked": verified,
+        "promotion_confirmed": bool(verified and promo),
+        "publicly_visible": bool(verified and promo),
+        "status": (
+            "Oferta verificada, elegivel para aparecer na vitrine."
+            if verified and promo else
+            "Produto consultado, mas nao foi confirmado desconto minimo de "
+            + str(PROMO_MIN) + "%."
+            if verified else
+            "Link cadastrado como pendente, sem publicacao. " + (reason or "")
+        ),
+        "note": "O OFERTIX nao comprova atribuicao de comissao; use link gerado na Central/Barra de Afiliados.",
+    }
+
+
 def category_details(category):
     """Consulta a arvore oficial; rankings so aceitam categorias finais."""
     category = str(category).strip().upper()
@@ -773,18 +838,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/admin/oauth/start":
                 return self.respond(200, {"authorization_url": oauth_ml.start(DB)})
             if path == "/api/admin/link":
-                item_id = str(body.get("id", "")).strip().upper()
-                link = str(body.get("affiliate_url", "")).strip()
-                if not VALID_ID.fullmatch(item_id) or not allowed_affiliate_link(link):
-                    return self.respond(400, {"error": "Informe ID MLB valido e link HTTPS do Mercado Livre."})
-                with db() as conn:
-                    cur = conn.execute(
-                        "UPDATE products SET affiliate_url=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (link, item_id),
-                    )
-                    if not cur.rowcount:
-                        return self.respond(404, {"error": "Importe primeiro o produto pelo ID da categoria."})
-                return self.respond(200, {"ok": True, "note": "Verifique no Gerador de Links do Mercado Livre se o URL informado realmente tem rastreio de afiliado."})
+                result = register_affiliate_item(body.get("id", ""), body.get("affiliate_url", ""))
+                return self.respond(200, result)
             if path == "/api/admin/import":
                 if not TOKEN and not oauth_ml.connected(DB):
                     return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
