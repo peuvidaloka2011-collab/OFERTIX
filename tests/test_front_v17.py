@@ -1,4 +1,4 @@
-"""V17: somente anúncios com desconto comprovável aparecem na vitrine."""
+"""V17: promocao real e catalogo Carraro separados."""
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -22,7 +22,7 @@ class AuditHTML(HTMLParser):
             self.fragments.append(a["href"][1:])
 
 
-class OnlyPromotionFrontTests(unittest.TestCase):
+class CarraroAndPromotionsFrontTests(unittest.TestCase):
     def test_show_only_promotions_and_valid_navigation(self):
         doc=AuditHTML();doc.feed(HTML)
         self.assertEqual(len(doc.ids),len(set(doc.ids)))
@@ -31,6 +31,15 @@ class OnlyPromotionFrontTests(unittest.TestCase):
         self.assertIn("featuredCards",doc.ids)
         self.assertIn("cards",doc.ids)
         self.assertIn("partnerGrid",doc.ids)
+        self.assertIn("carraro",doc.ids)
+        self.assertIn("carraroCount",doc.ids)
+        self.assertIn("carraroCards",doc.ids)
+        self.assertIn("carraroPrev",doc.ids)
+        self.assertIn("carraroNext",doc.ids)
+        self.assertIn("carraroPagination",doc.ids)
+        self.assertIn("/api/carraro-products",HTML)
+        self.assertIn("CARRARO_PAGE_SIZE=48",HTML)
+        self.assertIn("Sem estoque no momento",HTML)
         self.assertNotIn("catalogo-parceiros",doc.ids)
         self.assertNotIn("partnerCatalogCards",doc.ids)
         self.assertNotIn("partnerCatalogCount",doc.ids)
