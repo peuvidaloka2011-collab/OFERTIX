@@ -36,6 +36,20 @@ a{color:#09683d}#app{display:none}
 <section class="panel"><h2>Monitoramento</h2><div class="grid">
 <div class="stat">Produtos analisados<b id="total">—</b></div><div class="stat">Promoções publicadas<b id="published">—</b></div><div class="stat">Desconto mínimo<b id="min">—</b></div><div class="stat">Token da API<b id="token">—</b></div></div>
 <p class="muted" id="schedule"></p><button id="reload" class="secondary">Atualizar painel</button></section>
+<section class="panel" id="automaticFeeds">
+<h2>OFERTIX V14 — Lojas parceiras automáticas</h2>
+<p>O OFERTIX recebe catálogos autorizados da rede <b>Awin</b> e seleciona ofertas com pelo menos 10% de desconto informado pela loja. Os produtos já chegam com nome, foto, preço e link de afiliado fornecidos pelo feed, sem cadastro individual.</p>
+<div class="grid">
+  <div class="stat">Integração Awin<b id="awinConfigured">—</b></div>
+  <div class="stat">Promoções automáticas visíveis<b id="awinCount">—</b></div>
+  <div class="stat">Última sincronização<b id="awinSyncStatus">—</b></div>
+</div>
+<p id="awinSyncFeedback" class="feedback" role="status">Aguardando configuração de acesso ao feed.</p>
+<div class="row"><button id="awinSyncButton">Sincronizar ofertas agora</button>
+<a href="https://www.awin.com/br" target="_blank" rel="noopener noreferrer">Conhecer programa de afiliados Awin ↗</a></div>
+<p class="muted">Para ativar, você precisará de aprovação de afiliado e de um link de feed autorizado gerado em <b>Awin → Toolbox → Create-a-Feed</b>. Configure a URL no Render como variável secreta <code>OFERTIX_AWIN_FEED_URL</code>. Não cole senhas ou chaves no chat e não grave o link secreto no GitHub.</p>
+<p class="muted">Essa versão não simula descontos nem cria links de comissão. Os preços vêm do feed fornecido pela loja. O Render gratuito pode hibernar e perder o banco SQLite após um deploy: antes de usar comercialmente, migre para armazenamento persistente e agendamento externo.</p>
+</section>
 <section class="panel"><h2>Conectar Mercado Livre</h2>
 <p>Autorize a conta Mercado Livre vinculada à aplicação OFERTIX. A autorização usa PKCE e senha administrativa; nenhum token aparece no navegador.</p>
 <div class="row"><button id="oauth">Preparar autorização</button><a id="oauthLink" style="display:none" target="_blank" rel="noopener noreferrer" href="#">Autorizar Mercado Livre ↗</a></div>
@@ -211,6 +225,18 @@ async function load(){
   await loadManual();
   $("total").textContent=s.total;$("published").textContent=s.published;
   $("min").textContent=s.min_discount+"%";$("token").textContent=s.oauth_connected?"OAuth conectado":(s.token_configured?"Token manual":"Pendente");
+  $("awinConfigured").textContent=s.awin_feed_configured?"Configurada":"Não configurada";
+  $("awinCount").textContent=s.affiliate_feed_published||0;
+  const feed=s.awin_feed_status||{};
+  $("awinSyncStatus").textContent=feed.state==="ok"?"Atualizado":feed.state==="running"?"Atualizando":feed.state==="error"?"Falhou":"Aguardando";
+  $("awinSyncFeedback").textContent=s.awin_feed_configured?
+    ("Sincronização: "+(feed.state||"aguardando")+
+    "\nÚltima execução: "+(feed.at||"ainda não realizada")+
+    "\nProdutos examinados: "+(feed.scanned||0)+
+    "\nOfertas importadas: "+(feed.published||0)+
+    (feed.error?"\n"+feed.error:"")):
+    "Feed Awin ainda não configurado. Obtenha o acesso oficial e adicione OFERTIX_AWIN_FEED_URL no Render.";
+  $("awinSyncButton").disabled=!s.awin_feed_configured;
   $("oauth").disabled=!s.oauth_ready;
   $("schedule").textContent="Revalidação a cada "+s.refresh_every_hours+"h enquanto o servidor estiver ativo. Ofertas vencem após "+s.max_age_hours+"h. Categorias automáticas: "+(s.categories.join(", ")||"não configuradas")+"; última verificação: "+(s.last_sync.time||"ainda não realizada")+".";
   $("products").replaceChildren();
@@ -563,6 +589,24 @@ $("save").addEventListener("click",async()=>{
     $("linkFeedback").textContent="Não foi possível cadastrar: "+e.message+
       "\nSe o link abrir um catálogo, toque em Encontrar anúncios do catálogo. Se a consulta estiver bloqueada, use Opções avançadas.";
     $("linkFeedback").className="feedback error";
+  }finally{button.disabled=false;}
+});
+$("awinSyncButton").addEventListener("click",async()=>{
+  const button=$("awinSyncButton");button.disabled=true;
+  $("awinSyncFeedback").className="feedback";
+  $("awinSyncFeedback").textContent="Importando catálogo autorizado da Awin... Isso pode levar alguns segundos.";
+  try{
+    const result=await request("/api/admin/affiliate/sync",{method:"POST",body:"{}"});
+    $("awinSyncFeedback").textContent=result.state==="ok"?
+      ("Sincronização concluída!\nProdutos examinados: "+result.scanned+
+       "\nPromoções importadas: "+result.published+
+       "\nConfira a vitrine pública para visualizar as ofertas.") :
+      (result.message||"Importação não concluída.");
+    if(result.state!=="ok")$("awinSyncFeedback").className="feedback error";
+    await load();
+  }catch(e){
+    $("awinSyncFeedback").className="feedback error";
+    $("awinSyncFeedback").textContent="Falha na importação: "+e.message;
   }finally{button.disabled=false;}
 });
 $("reload").addEventListener("click",()=>load().catch(e=>info("Erro: "+e.message)));

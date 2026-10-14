@@ -189,6 +189,31 @@ O novo botão **Preencher dados pelo link** no cadastro manual (`/admin`) consul
 - A operação de sugestão é protegida pela senha administrativa e **não escreve no banco**. A publicação manual ainda exige todos os campos obrigatórios, link oficial do produto, confirmação de preço real e validade de até 72 horas.
 
 **Atenção:** links de perfil social criados pelo Gerador de produtos recomendados podem apontar para uma página de recomendações; não são links de produto individual. O usuário deve gerar um link oficial para o produto e verificar seu rastreamento. A consulta da API não garante comissões. O SQLite efêmero no Render Free continua inadequado para operação comercial sem persistência.
+## V14 — OFERTIX multiloja com sincronizacao automatica de redes de afiliados
+
+A V14 introduz **product data feeds autorizados da Awin**. É a primeira integração voltada à publicação automática de várias lojas, sem cadastro individual de produtos. A vitrine permite buscar por nome ou loja, filtrar por categoria e loja, consultar preço/desconto informado no feed e abrir o link rastreável da própria rede para comprar no site parceiro.
+
+### Ativação — somente uma vez
+
+1. Cadastre-se como afiliado/publisher na Awin e solicite aprovação para os anunciantes adequados. O acesso a cada feed depende dos programas permitidos. O OFERTIX não cria contas ou solicita aprovações automaticamente.
+2. Na Awin, entre em **Toolbox > Create-a-Feed** e configure um feed CSV filtrado por lojas e categorias, **somente Brasil / moeda BRL**. Selecione explicitamente as colunas `aw_deep_link`, `product_name`, `aw_product_id`, `merchant_product_id`, `merchant_id`, `merchant_name`, `search_price`, `product_price_old`, `currency`, `aw_image_url` ou `merchant_image_url`, `merchant_category` e `in_stock`. Se usar referencia `rrp_price` em vez de `product_price_old`, o importador não publicará ofertas com esse campo: RRP é preço sugerido, não comprovação de desconto.
+3. Configure a variável de ambiente secreta **`OFERTIX_AWIN_FEED_URL`** com a URL oficial do feed fornecida pela Awin, no Render. Nunca inclua esse link (que pode conter uma chave) no GitHub, em capturas de tela ou em chats.
+4. Confirme no painel OFERTIX a seção **Lojas parceiras automáticas**. Clique **Sincronizar ofertas agora** para o teste inicial; se o feed for válido, a vitrine recebe os produtos selecionados. Depois o servidor tenta atualizar a cada `OFERTIX_SYNC_HOURS` horas, enquanto estiver rodando.
+
+### Regras
+
+- Verifica no CSV a moeda BRL, disponibilidade quando informada, campos obrigatórios, HTTPS para imagens, domínio da Awin para `aw_deep_link`, preço atual `search_price` e preço antigo `product_price_old` realmente maiores. Exige desconto mínimo configurado em `OFERTIX_MIN_DISCOUNT` (10% por padrão).
+- Cada produto recebe identificador estável por loja e SKU; sincronizações seguintes atualizam preço e link. A vitrine oculta ofertas com feed não atualizado há 24 horas.
+- O feed deve ser CSV UTF-8, opcionalmente gzip. Para segurança e desempenho: 12 MB comprimido, 30 MB descomprimido, até 12 mil produtos analisados e 4 mil ofertas elegíveis; crie feeds filtrados para ficar dentro desses limites.
+- Feed indisponível, erro HTTP ou estrutura inesperada **não apagam os dados anteriores**. Ofertas antigas desaparecem após vencer o prazo de 24 horas.
+- Preços são fornecidos pelos lojistas na rede de afiliados, não auditados independentemente. A vitrine informa a origem dos valores e orienta conferir preço, frete e estoque na loja.
+- **Sem links de afiliado autorizados não há publicação**. O sistema não inventa URLs de comissão nem contorna bloqueios do Mercado Livre.
+- O OFERTIX não cobra do comprador e não processa pagamentos; a loja parceira concretiza o pedido e atribui a comissão sujeita às regras do programa. Para conciliar comissões, seria necessária uma integração adicional com os relatórios de transações da rede.
+
+### Limite para operação em produção
+
+**Não colocar em operação comercial ainda no Render Free com SQLite efêmero:** a conta pode perder dados em reinicializações/deploys e o processo adormece, parando o agendamento. É necessário hospedar o estado em um banco persistente e usar execução recorrente confiável (cron/worker), além de confirmar com a Awin os canais/sites autorizados de divulgação. A V14 é uma base de integração testável, não garantia de publicação contínua, tráfego ou comissão. O recurso Mercado Livre continua disponível separadamente, limitado às permissões atuais da conta.
+ 
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.

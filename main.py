@@ -19,10 +19,12 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urljoin
 import html
 import oauth_ml
+import affiliate_feeds
 
 BASE = Path(__file__).resolve().parent
 DB = Path(os.getenv("OFERTIX_DB_PATH", str(BASE / "ofertix.db")))
 TOKEN = os.getenv("ML_ACCESS_TOKEN", "").strip()
+AWIN_FEED_URL = os.getenv("OFERTIX_AWIN_FEED_URL", "").strip()
 ADMIN_KEY = os.getenv("OFERTIX_ADMIN_KEY", "").strip()
 PROMO_MIN = max(1, min(80, int(os.getenv("OFERTIX_MIN_DISCOUNT", "10"))))
 FRESH_HOURS = max(1, min(72, int(os.getenv("OFERTIX_FRESH_HOURS", "12"))))
@@ -86,6 +88,7 @@ def init_db():
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""")
+        affiliate_feeds.init_schema(conn)
     oauth_ml.init(DB)
 
 
@@ -1383,6 +1386,12 @@ def run_sync():
 
 def background_job():
     while True:
+        # Uma rede nao impede a outra: ML pode responder HTTP 403 enquanto Awin funciona.
+        if AWIN_FEED_URL:
+            try:
+                affiliate_feeds.run_sync(db, AWIN_FEED_URL, PROMO_MIN)
+            except Exception:
+                affiliate_feeds.LAST_SYNC.update(state="error", error="Importacao indisponivel.")
         try:
             run_sync()
         except Exception as exc:
@@ -1491,6 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
                     row["pricing_source"] = "manual"
                     row["verified_discount"] = False
                 rows.extend(manual_rows)
+                rows.extend(affiliate_feeds.visible_offers(conn))
                 rows.sort(key=lambda v: v.get("discount_percent") or 0, reverse=True)
             return self.respond(200, {"products": rows[:300], "minimum_discount": PROMO_MIN})
         if path == "/api/admin/status":
@@ -1505,13 +1515,17 @@ class Handler(BaseHTTPRequestHandler):
                     (PROMO_MIN, "-" + str(FRESH_HOURS) + " hours"),
                 ).fetchone()[0]
                 manual_count = len(visible_manual_offers(conn))
+                feed_count = len(affiliate_feeds.visible_offers(conn))
             return self.respond(200, {
                 "manual_published": manual_count,
+                "affiliate_feed_published": feed_count,
+                "awin_feed_configured": bool(AWIN_FEED_URL),
+                "awin_feed_status": dict(affiliate_feeds.LAST_SYNC),
                 "token_configured": bool(TOKEN or oauth_ml.connected(DB)),
                 "oauth_ready": oauth_ml.ready(), "oauth_connected": oauth_ml.connected(DB),
                 "categories": CATEGORIES, "min_discount": PROMO_MIN,
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
-                "total": total, "published": published + manual_count, "last_sync": LAST_SYNC,
+                "total": total, "published": published + manual_count + feed_count, "last_sync": LAST_SYNC,
             })
         if path == "/api/admin/catalog/diagnose":
             if not self.is_admin():
@@ -1572,6 +1586,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             body = self.read_body()
+            if path == "/api/admin/affiliate/sync":
+                return self.respond(200, affiliate_feeds.run_sync(db, AWIN_FEED_URL, PROMO_MIN))
             if path == "/api/admin/manual/suggest":
                 result = suggest_offer_fields_from_link(str(body.get("affiliate_url", "")))
                 return self.respond(200, result)
