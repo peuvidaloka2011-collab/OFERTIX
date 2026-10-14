@@ -51,7 +51,16 @@ a{color:#09683d}#app{display:none}
   <label>Preço atual (R$) <input id="manualPrice" type="number" inputmode="decimal" min=".01" step=".01" placeholder="1471.00" style="width:100%"></label>
   <label>Preço anterior (R$) <input id="manualOriginal" type="number" inputmode="decimal" min=".01" step=".01" placeholder="2299.00" style="width:100%"></label>
 </div>
-<p><label style="display:block">Link oficial de afiliado do produto <input id="manualLink" type="url" placeholder="https://meli.la/..." style="width:100%"></label></p>
+<div style="margin-top:14px">
+  <label style="display:block">Link oficial de afiliado do produto
+    <input id="manualLink" type="url" placeholder="https://meli.la/... ou URL completa do produto" style="width:100%">
+  </label>
+  <div class="row" style="margin-top:9px">
+    <button id="manualAutoFill" type="button">Preencher dados pelo link</button>
+    <span class="muted">A V13 tenta localizar nome, foto e preços pela API oficial.</span>
+  </div>
+  <p id="manualAutoFeedback" class="feedback" role="status">Cole o link de um produto específico e clique em Preencher dados pelo link.</p>
+</div>
 <div class="grid">
   <label>Foto do produto (JPG, PNG ou WebP)
     <input id="manualImageFile" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%">
@@ -61,6 +70,7 @@ a{color:#09683d}#app{display:none}
   </label>
 </div>
 <p class="muted">Ao escolher uma foto, o navegador a comprime antes de enviar. Use uma imagem que você tenha autorização para divulgar.</p>
+<p id="manualProvenance" class="muted" role="status">Origem dos dados: aguardando preenchimento. Valores não retornados pela API precisam ser confirmados manualmente.</p>
 <div class="grid">
   <label>Início da divulgação (opcional, agora se vazio)
     <input id="manualStart" type="datetime-local" style="width:100%">
@@ -224,6 +234,71 @@ async function op(path,body,msg){
   try{const data=await request(path,{method:"POST",body:JSON.stringify(body)});info(msg+"\n"+JSON.stringify(data,null,2));await load();}
   catch(e){info("Erro: "+e.message);}
 }
+$("manualLink").addEventListener("input",()=>{
+  $("manualConfirm").checked=false;
+  $("manualAutoFeedback").textContent="Link alterado. Confirme que os dados exibidos correspondem ao produto e clique em Preencher dados pelo link.";
+});
+$("manualAutoFill").addEventListener("click",async()=>{
+  const button=$("manualAutoFill");button.disabled=true;
+  $("manualAutoFeedback").textContent="Consultando o destino do link e os dados oficiais disponíveis...";
+  $("manualAutoFeedback").className="feedback";
+  try{
+    const url=$("manualLink").value.trim();
+    const result=await request("/api/admin/manual/suggest",{
+      method:"POST",body:JSON.stringify({affiliate_url:url})
+    });
+    $("manualConfirm").checked=false;
+    const filled=[];
+    if(result.title){
+      $("manualTitle").value=result.title;
+      filled.push("nome"+(result.title_source==="url_sugerido"?" sugerido pelo endereço":" obtido pela API"));
+    }
+    if(result.image){
+      if(!$("manualImageFile").files.length){
+        $("manualImageUrl").value=result.image;
+        uploadedImage="";
+        filled.push("foto da API");
+      }else{
+        filled.push("foto encontrada, mas a imagem já escolhida foi mantida");
+      }
+    }
+    if(result.category && !$("manualCategory").value.trim()){
+      $("manualCategory").value=result.category;filled.push("categoria geral");
+    }
+    if(result.price!=null){
+      $("manualPrice").value=Number(result.price).toFixed(2).replace(",",".");
+      filled.push("preço atual via "+(result.price_source==="api_sale_price"?"API de descontos":"API do anúncio"));
+    }
+    if(result.original_price!=null){
+      $("manualOriginal").value=Number(result.original_price).toFixed(2).replace(",",".");
+      filled.push("preço anterior confirmado pela API");
+    }else if(result.price!=null){
+      $("manualOriginal").value="";
+    }
+    $("manualProvenance").textContent=
+      "Origem dos dados: nome "+(result.title_source==="api"?"API":result.title_source==="url_sugerido"?"sugerido pelo endereço":"não identificado")+
+      "; foto "+(result.image_source==="api"?"API":"não identificada")+
+      "; desconto "+(result.discount_verified?"confirmado agora pela API":"não confirmado automaticamente")+
+      ". Revise todos os campos antes de salvar.";
+    if(!$("manualEnd").value){
+      const now=new Date();
+      $("manualEnd").value=toLocalInput(new Date(now.getTime()+12*60*60*1000).toISOString());
+      filled.push("validade sugerida de 12 horas");
+    }
+    $("manualAutoFeedback").textContent=
+      "Produto: "+result.product_id+" ("+(result.resolved_type==="catalog"?"catálogo":"anúncio")+")"+
+      "\nCampos preenchidos: "+(filled.join(", ")||"nenhum")+
+      "\n"+(result.messages||[]).join("\n")+
+      "\n\nÉ obrigatório confirmar o preço, a imagem e o link de afiliado do produto antes de salvar.";
+    if(!result.price||!result.original_price){
+      $("manualAutoFeedback").className="feedback error";
+    }
+  }catch(e){
+    $("manualAutoFeedback").className="feedback error";
+    $("manualAutoFeedback").textContent="Não foi possível preencher: "+e.message+
+      "\nVocê pode usar um link individual válido e completar os campos manualmente.";
+  }finally{button.disabled=false;}
+});
 function toUTCfromLocal(id){
   const value=$(id).value;
   if(!value)return null;
@@ -265,6 +340,9 @@ function clearManual(){
   for(const id of ["manualId","manualTitle","manualPrice","manualOriginal","manualLink","manualImageUrl","manualStart","manualEnd"]){$(id).value="";}
   $("manualCategory").value="Eletrônicos";$("manualImageFile").value="";
   $("manualConfirm").checked=false;uploadedImage="";
+  $("manualAutoFeedback").className="feedback";
+  $("manualAutoFeedback").textContent="Cole o link e toque em Preencher dados pelo link.";
+  $("manualProvenance").textContent="Origem dos dados: aguardando preenchimento.";
   $("manualFeedback").textContent="Cadastro limpo. Informe uma promoção real para criar outra oferta.";
 }
 $("manualClear").addEventListener("click",clearManual);
