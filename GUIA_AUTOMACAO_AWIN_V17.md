@@ -6,22 +6,22 @@ A V17 também reconhece automaticamente feeds CSV/GZIP `Google (Novo)` da Awin, 
 
 - **1.628** produtos no arquivo; **1.542** em estoque e **86** fora de estoque.
 - Todos têm nome, foto HTTPS, preço em **BRL** e URL de afiliado Awin.
-- A coluna `sale_price` está vazia em todos os registros. **Não foi identificado nenhum desconto que possa ser anunciado como promoção.**
-- O OFERTIX separa esses produtos na nova seção **Produtos de lojas parceiras**, com o preço informado pela loja e sem selo de desconto; a área **Ofertas do dia** continua exibindo apenas promoções com referência de preço suficiente.
+- A coluna `sale_price` está vazia em todos os registros. **Não foi identificado nenhum desconto que possa ser anunciado como promoção.** Por isso, nenhum desses produtos será publicado.
+- **A V17 publica somente produtos em promoção**, com referência de preço válida e pelo menos 10% de desconto no feed. Produtos sem `sale_price` válido não entram no catálogo público nem na vitrine.
 - O catálogo automático é alimentado pela URL de feed da Awin, cadastrada como segredo em GitHub Actions. **O CSV enviado para diagnóstico não deve ser incluído no repositório.**
-- Uma única atualização gera até 300 ofertas com desconto e até 2.000 produtos regulares; no navegador, a vitrine exibe até 60 resultados regulares por pesquisa para melhorar o desempenho.
-- O filtro por nome, categoria e loja considera produtos regulares e promocionais. A compra é feita na loja anunciante; comissão depende dos termos comerciais da Awin.
-- Se futuramente o feed trouxer `sale_price` menor que `price` em BRL e desconto de pelo menos 10%, esses itens poderão entrar automaticamente na seção de promoções, sem desenvolvimento adicional.
+- Uma atualização gera até 300 ofertas com desconto a partir de feeds autorizados. Não há catálogo separado de produtos regulares.
+- O filtro por nome, categoria e loja utiliza somente ofertas publicadas. A compra é feita na loja anunciante; comissão depende dos termos comerciais da Awin.
+- Se futuramente o feed trouxer `sale_price` menor que `price` em BRL e desconto de pelo menos 10%, esses itens poderão entrar automaticamente na vitrine, sem desenvolvimento adicional.
 
 **Segurança:** uma URL de feed com chave apareceu anteriormente em captura de tela. Recomenda-se renovar essa chave antes de configurá-la no GitHub. Nunca registrar essa URL em código, commits ou arquivos públicos.
 
 ## O que esta versão automatiza
 
-Sem cadastrar cada produto: GitHub Actions executa um sincronizador a cada 6 horas, lê os **feeds de produtos autorizados da Awin**, verifica links de afiliado, preços, fotos, moeda BRL e descontos superiores ao mínimo configurado (10% no OFERTIX), e publica até 300 ofertas relevantes. O site lê o arquivo gerado pelo GitHub e atualiza a vitrine automaticamente. O comprador finaliza a compra no anunciante.
+Sem cadastrar cada produto: GitHub Actions executa um sincronizador a cada 6 horas, lê os **feeds de produtos autorizados da Awin**, verifica links de afiliado, preços, fotos, moeda BRL e descontos de pelo menos 10%, e publica até 300 ofertas relevantes. O site lê o arquivo gerado pelo GitHub e atualiza a vitrine automaticamente. O comprador finaliza a compra no anunciante.
 
 A rotina publica dados **no branch separado `ofertix-catalog`**, não modifica a branch `main`, portanto **não faz deploy no Render a cada atualização do catálogo**. O Render lê a lista pública com cache de 5 minutos. As ofertas expiram automaticamente 24 horas depois da última geração. Sem feed autorizado, não são publicados produtos falsos.
 
-O campo `product_price_old` é usado como referência do desconto quando o anunciante o fornece. Não se substitui pelo preço sugerido `rrp_price`. Descontos vindos do feed aparecem identificados como valores informados pela loja, não verificados independentemente. O sistema não garante disponibilidade, frete ou comissão.
+Nos feeds Awin padrão, o campo `product_price_old` é usado como referência do desconto quando o anunciante o fornece (não confundir com `rrp_price`). Nos feeds Google da Awin, o desconto precisa ser demonstrado por `sale_price` menor que `price`, ambos em BRL. Descontos vindos do feed aparecem identificados como valores informados pela loja, não verificados independentemente. O sistema não garante disponibilidade, frete ou comissão.
 
 ## O que o usuário precisa fazer uma única vez
 
@@ -33,7 +33,7 @@ Na Awin, selecione `Anunciantes → Fazer Parte dos Programas` e solicite progra
 
 Na Awin, procure `Ferramentas (Toolbox) → Create-a-Feed`. Escolha anunciantes permitidos, idioma Português (Brasil) quando disponível, formato **CSV**, delimitador **vírgula**, codificação **UTF-8**, compressão gzip opcional. Selecione no mínimo:
 
-`aw_deep_link`, `aw_product_id`, `merchant_product_id`, `merchant_id`, `merchant_name`, `product_name`, `search_price`, `product_price_old`, `currency`, `merchant_image_url` ou `aw_image_url`, `merchant_category`, `in_stock`.
+`aw_deep_link`, `aw_product_id`, `merchant_product_id`, `merchant_id`, `merchant_name`, `product_name`, `search_price`, `product_price_old`, `currency`, `merchant_image_url` ou `aw_image_url`, `merchant_category`, `in_stock`. Para formato Google, é indispensável `sale_price` e `price` (com BRL), além do link e disponibilidade.
 
 Configure apenas conteúdo adequado para o público geral, lojas com entregas ao Brasil e preços em BRL. O feed deve ser pequeno: **até 12.000 linhas por feed e 12 MB comprimidos**. A Awin pode não fornecer todos esses campos para determinado anunciante; sem preço antigo confirmado, o item não aparece como promoção.
 
