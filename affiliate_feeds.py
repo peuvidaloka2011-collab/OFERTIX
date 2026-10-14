@@ -266,8 +266,9 @@ def _google_price(raw):
 def parse_google_csv(text, minimum_discount=10):
     """Converte feeds Awin no esquema Google Merchant.
 
-    Sem sale_price: ignora o produto, pois nao ha promocao comprovavel.
-    Preço em BRL, estoque real, imagem HTTPS e deep link rastreável obrigatórios.
+    Sem sale_price: nao anuncia desconto, mas inclui o produto Carraro BR
+    no catalogo separado quando autorizado. Preco em BRL, estoque real,
+    imagem HTTPS e deep link rastreavel obrigatorios.
     """
     if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_CSV_BYTES:
         raise ValueError("Feed Google vazio ou acima do limite.")
@@ -277,6 +278,7 @@ def parse_google_csv(text, minimum_discount=10):
     if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
         raise ValueError("Colunas Google Awin obrigatorias ausentes.")
     discounts = {}
+    carraro = {}
     scanned=0
     for row in reader:
         scanned += 1
@@ -321,7 +323,13 @@ def parse_google_csv(text, minimum_discount=10):
                                   "discount_percent":percentage}
                 if len(discounts)>MAX_OFFERS:
                     raise ValueError("Feed possui mais promocoes que o limite.")
-                continue
+        # Excecao solicitada: exibir todos os produtos Carraro BR em estoque,
+        # identificados como catalogo comum, mesmo sem desconto.
+        if merchant_id == "81383" and merchant.lower() == "carraro br":
+            carraro[ident]=item
+            if len(carraro)>MAX_OFFERS:
+                raise ValueError("Catalogo Carraro maior que o limite.")
     if not scanned:
         raise ValueError("Feed Google sem produtos.")
-    return {"scanned":scanned,"offers":list(discounts.values())}
+    return {"scanned":scanned,"offers":list(discounts.values()),
+            "carraro_products":list(carraro.values())}
