@@ -99,12 +99,16 @@ async function importCategory(){
     }else if(data.ranking_unavailable){
       importInfo(data.message,true);
     }else{
-      importInfo("Verificação concluída!\nProdutos analisados: "+data.checked+
+      importInfo("Verificação concluída!\nEntradas no ranking: "+(data.ranking_entries??0)+
+        "\nAnúncios encontrados e analisados: "+data.checked+
+        "\nProdutos de catálogo convertidos em anúncios: "+(data.resolved_catalog??0)+
         "\nPromoções com desconto confirmado: "+data.promotions+
-        "\nSem desconto: "+data.without_discount+
-        "\nFalhas ao consultar produto: "+data.failed+
-        "\nTipos de catálogo não processados: "+data.catalog_types_not_supported+
-        "\n"+(data.message||""));
+        "\nAnúncios sem desconto de 10%: "+data.without_discount+
+        "\nFalhas nas consultas dos anúncios: "+data.failed+
+        "\nProdutos de catálogo sem anúncio acessível: "+(data.catalog_unresolved??0)+
+        "\nFalhas de acesso ao catálogo: "+(data.catalog_errors??0)+
+        (Array.isArray(data.diagnostics)&&data.diagnostics.length?"\nDetalhes: "+data.diagnostics.join("; "):"")+
+        "\n"+(data.message||""), Boolean((data.catalog_errors||data.failed) && !data.checked));
     }
     await load();
   }catch(e){importInfo("Não foi possível importar: "+e.message,true);}

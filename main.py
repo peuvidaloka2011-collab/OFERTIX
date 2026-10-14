@@ -197,6 +197,52 @@ def category_details(category):
     }
 
 
+def ranked_item_candidates(entry):
+    """Traduz ITEM/PRODUCT/USER_PRODUCT em IDs de anúncios MLB, nunca em links imaginários.
+
+    PRODUCT: produto de catálogo -> anúncio vencedor (buy_box_winner.item_id).
+    USER_PRODUCT: produto de vendedor -> user_id -> anúncios do próprio vendedor.
+    Alguns vendedores/recursos podem negar acesso (403); tratar como não resolvido.
+    """
+    kind = str(entry.get("type", "")).upper()
+    ranked_id = str(entry.get("id", "")).upper()
+    if kind == "ITEM":
+        return [ranked_id] if VALID_ID.fullmatch(ranked_id) else []
+    if kind == "PRODUCT":
+        if not VALID_ID.fullmatch(ranked_id):
+            return []
+        product = ml_api("/products/" + ranked_id)
+        if not isinstance(product, dict) or product.get("status") != "active":
+            return []
+        winner = product.get("buy_box_winner") or {}
+        item_id = str(winner.get("item_id", "")).upper() if isinstance(winner, dict) else ""
+        return [item_id] if VALID_ID.fullmatch(item_id) else []
+    if kind == "USER_PRODUCT":
+        if not re.fullmatch(r"MLBU\d+", ranked_id):
+            return []
+        user_product = ml_api("/user-products/" + ranked_id)
+        if not isinstance(user_product, dict):
+            return []
+        user_id = str(user_product.get("user_id", ""))
+        if not user_id.isdecimal() or not 0 < int(user_id) < 10**18:
+            return []
+        search = ml_api(
+            "/users/" + user_id + "/items/search?user_product_id=" + ranked_id
+        )
+        if not isinstance(search, dict) or not isinstance(search.get("results"), list):
+            return []
+        # Limitar chamadas: 2 anúncios por produto de usuário, sem buscar vendedores terceiros.
+        found = []
+        for candidate in search["results"]:
+            item_id = str(candidate).upper()
+            if VALID_ID.fullmatch(item_id) and item_id not in found:
+                found.append(item_id)
+            if len(found) >= 2:
+                break
+        return found
+    return []
+
+
 def import_category(category):
     category = str(category).upper().strip()
     details = category_details(category)
@@ -204,7 +250,7 @@ def import_category(category):
         return {
             **details, "checked": 0, "promotions": 0,
             "requires_subcategory": True,
-            "message": "Essa categoria tem subdivisoes. Escolha uma subcategoria ate chegar a uma categoria final, e tente importar novamente.",
+            "message": "Essa categoria tem subdivisoes. Escolha uma subcategoria final para importar.",
         }
     with IMPORT_LOCK:
         try:
@@ -214,45 +260,97 @@ def import_category(category):
                 return {
                     "category": category, "checked": 0, "promotions": 0,
                     "ranking_unavailable": True,
-                    "message": "Essa categoria final nao possui um ranking de mais vendidos disponivel no Mercado Livre.",
+                    "message": "Essa categoria final nao possui ranking de mais vendidos disponivel.",
                 }
             raise
-        content = highlights.get("content", [])
+
+        content = highlights.get("content", []) if isinstance(highlights, dict) else None
         if not isinstance(content, list):
             raise ValueError("O ranking retornou um formato inesperado.")
-        ranked = [
-            obj for obj in content
-            if isinstance(obj, dict)
-            and obj.get("type") == "ITEM"
-            and VALID_ID.fullmatch(str(obj.get("id", "")))
+
+        ranking = [
+            entry for entry in content[:20]
+            if isinstance(entry, dict) and entry.get("type") in ("ITEM", "PRODUCT", "USER_PRODUCT")
         ]
         type_counts = {
-            kind: sum(1 for obj in content if isinstance(obj, dict) and obj.get("type") == kind)
+            kind: sum(1 for entry in ranking if entry.get("type") == kind)
             for kind in ("ITEM", "PRODUCT", "USER_PRODUCT")
         }
-        verified, discarded, failed = 0, 0, 0
-        for entry in ranked[:20]:
-            item_id = entry["id"]
+        verified = discarded = failed = checked = catalog_unresolved = catalog_errors = 0
+        resolved_catalog = 0
+        repeated = 0
+        seen_item_ids = set()
+        reasons = []
+        for entry in ranking:
+            kind = entry["type"]
             try:
-                if verify_and_save(item_id, category, entry.get("position", 999)):
-                    verified += 1
-                else:
-                    discarded += 1
-            except (urllib.error.URLError, ValueError, KeyError, TypeError, RuntimeError):
-                deactivate(item_id)
-                failed += 1
+                candidates = ranked_item_candidates(entry)
+            except urllib.error.HTTPError as error:
+                catalog_errors += 1
+                if len(reasons) < 3:
+                    reasons.append(kind + " indisponivel (HTTP " + str(error.code) + ")")
+                continue
+            except (urllib.error.URLError, KeyError, ValueError, TypeError, RuntimeError):
+                catalog_errors += 1
+                if len(reasons) < 3:
+                    reasons.append("Falha ao resolver identificador " + kind)
+                continue
+
+            if not candidates:
+                if kind != "ITEM":
+                    catalog_unresolved += 1
+                continue
+            if kind != "ITEM":
+                resolved_catalog += 1
+            for item_id in candidates:
+                if item_id in seen_item_ids:
+                    repeated += 1
+                    continue
+                seen_item_ids.add(item_id)
+                checked += 1
+                try:
+                    if verify_and_save(item_id, category, entry.get("position", 999)):
+                        verified += 1
+                    else:
+                        discarded += 1
+                except urllib.error.HTTPError as error:
+                    deactivate(item_id)
+                    failed += 1
+                    if len(reasons) < 3:
+                        reasons.append("Consulta de preco ou anuncio: HTTP " + str(error.code))
+                except (urllib.error.URLError, ValueError, KeyError, TypeError, RuntimeError):
+                    deactivate(item_id)
+                    failed += 1
+
+        if not ranking:
+            message = "O ranking nao retornou tipos ITEM, PRODUCT ou USER_PRODUCT."
+        elif not checked:
+            message = (
+                "O ranking retornou produtos, mas nenhum anuncio com ID MLB acessivel "
+                "foi identificado. Verifique as permissoes da API ou tente outra categoria."
+            )
+        else:
+            message = (
+                "Anuncios consultados. Apenas descontos comprovados de pelo menos "
+                + str(PROMO_MIN) + "% entram no catalogo; links de afiliado oficiais "
+                "ainda precisam ser associados para publicacao."
+            )
         return {
-            "category": category, "checked": len(ranked[:20]), "promotions": verified,
-            "without_discount": discarded, "failed": failed,
-            "catalog_types_not_supported": len(content) - len(ranked),
+            "category": category,
+            "ranking_entries": len(ranking),
+            "checked": checked,
+            "promotions": verified,
+            "without_discount": discarded,
+            "failed": failed,
+            "resolved_catalog": resolved_catalog,
+            "catalog_unresolved": catalog_unresolved,
+            "catalog_errors": catalog_errors,
+            # Legacy field name retained to avoid breaking older dashboard clients.
+            "catalog_types_not_supported": catalog_unresolved + catalog_errors,
+            "duplicate_items_skipped": repeated,
             "ranking_types": type_counts,
-            "message": (
-                "O ranking retornou apenas produtos de catalogo (PRODUCT/USER_PRODUCT). "
-                "Esses IDs ainda precisam de resolucao para anuncios antes da consulta de precos."
-                if not ranked and content else
-                "A verificacao terminou. Promocoes validas so aparecem ao publico depois que "
-                "voce associar seus links oficiais de afiliado."
-            ),
+            "diagnostics": reasons,
+            "message": message,
         }
 
 

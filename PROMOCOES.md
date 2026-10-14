@@ -67,6 +67,20 @@ O fluxo utiliza state de uso único com validade de 10 minutos, PKCE S256, POST 
 
 **Importante:** enquanto o OFERTIX estiver no Render Free, os tokens e links salvos no SQLite local podem ser perdidos em novos deploys ou reinicializações. Esta configuração serve apenas para testes. A automação de produção depende de banco persistente, armazenamento seguro e execução agendada fora do servidor Free. O OAuth não gera links de afiliado por si só; os links devem ser obtidos por mecanismos oficiais autorizados.
 
+## V4: ranking de mais vendidos com produtos de catalogo
+
+A API de highlights pode entregar itens de tres tipos:
+
+- ITEM: ID MLB de publicacao; verificar preco diretamente.
+- PRODUCT: ID MLB de produto de catalogo; consultar /products/ID e extrair buy_box_winner.item_id quando produto ativo.
+- USER_PRODUCT: ID MLBU; consultar /user-products/ID para identificar user_id e /users/{user_id}/items/search?user_product_id=ID para localizar publicacoes. Verificar no maximo 2 itens por User Product para limitar chamadas.
+
+A versao V4 nao inventa anuncios ou links: se o Mercado Livre nao devolver uma publicacao MLB valida, o produto sera registrado como "sem anuncio acessivel" e nao sera divulgado. Em caso de bloqueio 403 ou falta de permissao, o painel informa "Falhas de acesso ao catalogo"; algumas consultas a anuncios de terceiros podem nao estar disponiveis a esta aplicacao.
+
+Apenas itens ativos com reducao confirmada de >= 10% no endpoint sale_price sao considerados promocao. Ainda e necessario associar **manualmente** o link oficial de afiliado do anuncio MLB correspondente. A API OAuth comum nao autoriza presumir link de comissao.
+
+A importacao continua limitada a ate 20 entradas do ranking, e pode demorar ou sofrer limitacao de requisicoes. Render Free pode desligar e perder banco SQLite e tokens; antes de uso publico e necessaria base persistente.
+
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.

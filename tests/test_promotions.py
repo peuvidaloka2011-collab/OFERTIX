@@ -54,23 +54,91 @@ class PromotionsTest(unittest.TestCase):
         self.assertEqual(result["checked"], 0)
         self.assertEqual(result["subcategories"][0]["id"], "MLB10001")
 
-    def test_final_category_counts_catalog_types_without_inventing_offers(self):
+    def test_catalog_product_resolves_buy_box_winner_and_checks_discount(self):
+        paths = []
+        def fake_api(path):
+            paths.append(path)
+            if path.startswith("/categories/"):
+                return {"name":"Eletronicos", "children_categories":[]}
+            if path.startswith("/highlights/"):
+                return {"content":[{"type":"PRODUCT","id":"MLB900123","position":1}]}
+            if path == "/products/MLB900123":
+                return {"status":"active","buy_box_winner":{"item_id":"MLB55555"}}
+            if path == "/items/MLB55555":
+                return self.item()
+            if path == "/items/MLB55555/sale_price?context=channel_marketplace":
+                return self.sale()
+            raise AssertionError(path)
+        with patch.object(main,"ml_api",side_effect=fake_api):
+            result=main.import_category("MLB432825")
+        self.assertEqual(result["ranking_entries"],1)
+        self.assertEqual(result["checked"],1)
+        self.assertEqual(result["resolved_catalog"],1)
+        self.assertEqual(result["promotions"],1)
+        self.assertIn("/products/MLB900123",paths)
+        with main.db() as conn:
+            row=conn.execute("SELECT id,affiliate_url,is_promo FROM products").fetchone()
+            self.assertEqual(row["id"],"MLB55555")
+            self.assertIsNone(row["affiliate_url"])
+            self.assertEqual(row["is_promo"],1)
+
+    def test_user_product_resolves_seller_items_and_enforces_discount(self):
         def fake_api(path):
             if path.startswith("/categories/"):
-                return {"name": "Fones", "children_categories": []}
+                return {"name":"Acessorios", "children_categories":[]}
             if path.startswith("/highlights/"):
-                return {"content": [
-                    {"type": "USER_PRODUCT", "id": "MLBU123", "position": 1},
-                    {"type": "PRODUCT", "id": "MLB987", "position": 2}
-                ]}
-            raise AssertionError("Nao deveria consultar itens de catalogo sem resolucao: " + path)
-        with patch.object(main, "ml_api", side_effect=fake_api):
-            result = main.import_category("MLB432825")
-        self.assertEqual(result["checked"], 0)
-        self.assertEqual(result["catalog_types_not_supported"], 2)
-        self.assertIn("catalogo", result["message"])
+                return {"content":[{"type":"USER_PRODUCT","id":"MLBU123","position":1}]}
+            if path=="/user-products/MLBU123":
+                return {"id":"MLBU123","user_id":987654}
+            if path=="/users/987654/items/search?user_product_id=MLBU123":
+                return {"results":["MLB10101","MLB20202","MLB30303"]}
+            if path.startswith("/items/") and "/sale_price" not in path:
+                return self.item()
+            if path.startswith("/items/MLB10101/sale_price"):
+                return self.sale(80,100)
+            if path.startswith("/items/MLB20202/sale_price"):
+                return self.sale(100,100)
+            raise AssertionError(path)
+        with patch.object(main,"ml_api",side_effect=fake_api):
+            result=main.import_category("MLB7466")
+        self.assertEqual(result["checked"],2)
+        self.assertEqual(result["promotions"],1)
+        self.assertEqual(result["without_discount"],1)
+        self.assertEqual(result["catalog_unresolved"],0)
         with main.db() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM products").fetchone()[0],2)
+
+    def test_product_with_no_buy_box_is_not_published(self):
+        def fake_api(path):
+            if path.startswith("/categories/"):
+                return {"name":"Acessorios","children_categories":[]}
+            if path.startswith("/highlights/"):
+                return {"content":[{"type":"PRODUCT","id":"MLB987","position":1}]}
+            if path=="/products/MLB987":
+                return {"status":"active","buy_box_winner":None}
+            raise AssertionError(path)
+        with patch.object(main,"ml_api",side_effect=fake_api):
+            result=main.import_category("MLB432825")
+        self.assertEqual(result["checked"],0)
+        self.assertEqual(result["catalog_unresolved"],1)
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM products").fetchone()[0],0)
+
+    def test_catalog_permission_error_is_reported_without_false_items(self):
+        from urllib.error import HTTPError
+        def fake_api(path):
+            if path.startswith("/categories/"):
+                return {"name":"Acessorios", "children_categories":[]}
+            if path.startswith("/highlights/"):
+                return {"content":[{"type":"USER_PRODUCT","id":"MLBU123","position":1}]}
+            if path=="/user-products/MLBU123":
+                raise HTTPError("https://api.mercadolibre.com",403,"Forbidden",{},None)
+            raise AssertionError(path)
+        with patch.object(main,"ml_api",side_effect=fake_api):
+            result=main.import_category("MLB432825")
+        self.assertEqual(result["checked"],0)
+        self.assertEqual(result["catalog_errors"],1)
+        self.assertIn("403",result["diagnostics"][0])
 
     def test_final_category_imports_verified_item(self):
         def fake_api(path):
