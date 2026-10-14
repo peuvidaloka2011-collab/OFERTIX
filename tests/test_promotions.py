@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
 
 import main
@@ -32,6 +33,168 @@ class PromotionsTest(unittest.TestCase):
 
     def sale(self, current=80, regular=100):
         return {"amount": current, "regular_amount": regular, "currency_id": "BRL"}
+
+    def manual_offer(self, **changes):
+        data = {
+            "title": "Caixa de Som AIWA Boombox Plus",
+            "category": "Eletronicos",
+            "price": 1471.00,
+            "original_price": 2299.00,
+            "affiliate_url": "https://meli.la/ProdutoOficial",
+            "image": "https://http2.mlstatic.com/foto-produto.jpg",
+            "starts_at": None,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(),
+            "confirmed_by_admin": True,
+        }
+        data.update(changes)
+        return data
+
+    def test_v12_manual_offer_without_oauth_appears_as_unverified(self):
+        with patch.object(main, "ml_api") as api:
+            created=main.save_manual_offer(self.manual_offer())
+        api.assert_not_called()
+        self.assertTrue(created["ok"])
+        self.assertEqual(created["pricing_source"], "manual")
+        with main.db() as conn:
+            listed=main.visible_manual_offers(conn)
+        self.assertEqual(len(listed),1)
+        self.assertAlmostEqual(listed[0]["discount_percent"],36.02,places=1)
+        self.assertEqual(listed[0]["title"],"Caixa de Som AIWA Boombox Plus")
+        server=main.ThreadingHTTPServer(("127.0.0.1",0),main.Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("GET","/api/products")
+            response=conn.getresponse()
+            self.assertEqual(response.status,200)
+            data=json.loads(response.read())
+            conn.close()
+            self.assertEqual(len(data["products"]),1)
+            offer=data["products"][0]
+            self.assertEqual(offer["pricing_source"],"manual")
+            self.assertFalse(offer["verified_discount"])
+            self.assertEqual(offer["affiliate_url"],"https://meli.la/ProdutoOficial")
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("GET","/api/admin/manual/offers")
+            response=conn.getresponse()
+            self.assertEqual(response.status,403)
+            response.read();conn.close()
+        finally:
+            server.shutdown();server.server_close()
+
+    def test_v12_manual_offer_schedule_and_expiry_without_background_worker(self):
+        now=datetime.now(timezone.utc)
+        start=(now+timedelta(hours=1)).isoformat()
+        end=(now+timedelta(hours=2)).isoformat()
+        result=main.save_manual_offer(self.manual_offer(starts_at=start,expires_at=end))
+        with main.db() as conn:
+            self.assertEqual(main.visible_manual_offers(conn),[])
+            conn.execute("UPDATE manual_offers SET starts_at=? WHERE id=?",
+                ((now-timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),result["id"]))
+        with main.db() as conn:
+            self.assertEqual(len(main.visible_manual_offers(conn)),1)
+            conn.execute("UPDATE manual_offers SET expires_at=? WHERE id=?",
+                ((now-timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),result["id"]))
+        with main.db() as conn:
+            self.assertEqual(main.visible_manual_offers(conn),[])
+
+    def test_v12_manual_offer_pausing_and_resuming(self):
+        result=main.save_manual_offer(self.manual_offer())
+        main.change_manual_offer({"id":result["id"],"active":False})
+        with main.db() as conn:self.assertEqual(main.visible_manual_offers(conn),[])
+        main.change_manual_offer({"id":result["id"],"active":True})
+        with main.db() as conn:self.assertEqual(len(main.visible_manual_offers(conn)),1)
+
+    def test_v12_manual_offer_can_be_edited_and_resets_schedule(self):
+        result=main.save_manual_offer(self.manual_offer())
+        changed=self.manual_offer(
+            id=result["id"],price=1300.0,original_price=2500.0,
+            expires_at=(datetime.now(timezone.utc)+timedelta(hours=3)).isoformat())
+        main.save_manual_offer(changed)
+        with main.db() as conn:
+            row=conn.execute("SELECT * FROM manual_offers WHERE id=?",(result["id"],)).fetchone()
+            self.assertEqual(row["price"],1300.0)
+            self.assertEqual(row["discount_percent"],48.0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM manual_offers").fetchone()[0],1)
+
+    def test_v12_manual_rejects_low_discount_false_prices_and_long_expiration(self):
+        cases=[
+            {"price":2000,"original_price":2100},
+            {"price":2300,"original_price":2299},
+            {"price":"nan"},
+            {"price":-1},
+            {"price":True},
+            {"expires_at":(datetime.now(timezone.utc)+timedelta(days=5)).isoformat()},
+            {"expires_at":(datetime.now(timezone.utc)-timedelta(minutes=1)).isoformat()},
+            {"confirmed_by_admin":False},
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                with self.assertRaises(ValueError):
+                    main.save_manual_offer(self.manual_offer(**case))
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM manual_offers").fetchone()[0],0)
+
+    def test_v12_rejects_affiliate_profile_and_untrusted_links(self):
+        bad=[
+            "https://www.mercadolivre.com.br/",
+            "https://www.mercadolivre.com.br/social/conta",
+            "https://www.mercadolivre.com.br/afiliados/hub?is_affiliate=true",
+            "https://meli.la",
+            "http://meli.la/abc",
+            "https://meli.la.evil.com/test",
+            "https://evil.com/p/MLB1234567890",
+        ]
+        for link in bad:
+            with self.subTest(link=link):
+                with self.assertRaises(ValueError):
+                    main.save_manual_offer(self.manual_offer(affiliate_url=link))
+
+    def test_v12_manual_rejects_invalid_image_and_accepts_compressed_photo(self):
+        import base64
+        for image in [
+            "https://localhost/secret.jpg",
+            "https://mlstatic.com.evil.com/foto.png",
+            "data:image/png;base64,bm90aW1hZ2U=",
+            "data:text/html;base64,PHNjcmlwdD4=",
+            "https://127.0.0.1/picture.png",
+        ]:
+            with self.subTest(image=image):
+                with self.assertRaises(ValueError):
+                    main.save_manual_offer(self.manual_offer(image=image))
+        sample=base64.b64encode(b"\xff\xd8\xff"+b"a"*45).decode("ascii")
+        result=main.save_manual_offer(self.manual_offer(image="data:image/jpeg;base64,"+sample))
+        with main.db() as conn:
+            row=conn.execute("SELECT image FROM manual_offers WHERE id=?",(result["id"],)).fetchone()
+        self.assertTrue(row["image"].startswith("data:image/jpeg;base64,"))
+
+    def test_v12_manual_routes_require_admin_and_no_oauth(self):
+        server=main.ThreadingHTTPServer(("127.0.0.1",0),main.Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        body=json.dumps(self.manual_offer())
+        try:
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("POST","/api/admin/manual/save",body=body,headers={"Content-Type":"application/json"})
+            response=conn.getresponse()
+            self.assertEqual(response.status,403);response.read();conn.close()
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("POST","/api/admin/manual/save",body=body,
+                         headers={"X-Admin-Key":"test-key-only","Content-Type":"application/json"})
+            response=conn.getresponse()
+            self.assertEqual(response.status,200)
+            created=json.loads(response.read());conn.close()
+            self.assertTrue(created["ok"])
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("GET","/api/admin/status",headers={"X-Admin-Key":"test-key-only"})
+            response=conn.getresponse()
+            self.assertEqual(response.status,200)
+            data=json.loads(response.read())
+            self.assertEqual(data["manual_published"],1)
+            self.assertEqual(data["published"],1)
+            response.read();conn.close()
+        finally:
+            server.shutdown();server.server_close()
 
     def test_only_confirmed_discount(self):
         result = main.verified_promotion(self.item(), self.sale())
