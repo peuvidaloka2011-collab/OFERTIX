@@ -1,25 +1,28 @@
 # OFERTIX V17 — Catálogo de promoções automático
 
-## Suporte a catálogos Awin formato Google — Carraro BR
+## Catálogo Carraro BR (decisão atualizada)
 
-A V17 também reconhece automaticamente feeds CSV/GZIP `Google (Novo)` da Awin, sem converter o arquivo manualmente. Exemplo real analisado: `81383-retail-pt_BR.csv.gz` da **Carraro BR** (catálogo não incluído no código).
+A pedido do responsável pelo OFERTIX, a Carraro BR terá uma **vitrine separada** das promoções, incluindo todos os seus produtos disponíveis no feed, mesmo sem desconto.
 
-- **1.628** produtos no arquivo; **1.542** em estoque e **86** fora de estoque.
-- Todos têm nome, foto HTTPS, preço em **BRL** e URL de afiliado Awin.
-- A coluna `sale_price` está vazia em todos os registros. **Não foi identificado nenhum desconto que possa ser anunciado como promoção.** Por isso, nenhum desses produtos será publicado.
-- **A V17 publica somente produtos em promoção**, com referência de preço válida e pelo menos 10% de desconto no feed. Produtos sem `sale_price` válido não entram no catálogo público nem na vitrine.
-- O catálogo automático é alimentado pela URL de feed da Awin, cadastrada como segredo em GitHub Actions. **O CSV enviado para diagnóstico não deve ser incluído no repositório.**
-- Uma atualização gera até 300 ofertas com desconto a partir de feeds autorizados. Não há catálogo separado de produtos regulares.
-- O filtro por nome, categoria e loja utiliza somente ofertas publicadas. A compra é feita na loja anunciante; comissão depende dos termos comerciais da Awin.
-- Se futuramente o feed trouxer `sale_price` menor que `price` em BRL e desconto de pelo menos 10%, esses itens poderão entrar automaticamente na vitrine, sem desenvolvimento adicional.
+Diagnóstico do arquivo `81383-retail-pt_BR.csv.gz` autorizado pela Awin (não incluído no repositório):
 
-**Segurança:** uma URL de feed com chave apareceu anteriormente em captura de tela. Recomenda-se renovar essa chave antes de configurá-la no GitHub. Nunca registrar essa URL em código, commits ou arquivos públicos.
+- **1.628 itens** Carraro BR, todos com preço em **BRL**, foto HTTPS e link de afiliado da Awin.
+- **1.542 em estoque** podem ter o botão `Ver na Carraro`.
+- **86 fora de estoque** aparecem como `Indisponível`, sem botão para comprar.
+- O feed não informa `sale_price` para nenhum produto. **Nenhum recebe selo de desconto**.
+- Área `Promoções` segue com regra de **desconto >=10%** confirmado pelo preço anterior e atual do feed.
+- Área `Catálogo Carraro BR` mostra preço normal, filtros por categoria e loja, busca e **paginação de 48 itens**. Todos os registros podem ser acessados por página.
+- Produtos com desconto da Carraro, quando existirem em feeds futuros, podem aparecer nas duas seções, corretamente classificados.
+
+A atualização automática continua a cada 6 horas, desde que a chave de feed autorizada esteja cadastrada no segredo do GitHub `OFERTIX_AWIN_FEED_URLS`. O catálogo Carraro e as promoções são publicados no branch separado `ofertix-catalog`, para não iniciar deploy no Render a cada sincronização.
+
+**Nunca subir o arquivo CSV original ou o endereço do feed com API key ao repositório.** Uma chave apareceu em capturas antigas: substitua-a antes do uso em produção.
 
 ## O que esta versão automatiza
 
 Sem cadastrar cada produto: GitHub Actions executa um sincronizador a cada 6 horas, lê os **feeds de produtos autorizados da Awin**, verifica links de afiliado, preços, fotos, moeda BRL e descontos de pelo menos 10%, e publica até 300 ofertas relevantes. O site lê o arquivo gerado pelo GitHub e atualiza a vitrine automaticamente. O comprador finaliza a compra no anunciante.
 
-A rotina publica dados **no branch separado `ofertix-catalog`**, não modifica a branch `main`, portanto **não faz deploy no Render a cada atualização do catálogo**. O Render lê a lista pública com cache de 5 minutos. As ofertas expiram automaticamente 24 horas depois da última geração. Sem feed autorizado, não são publicados produtos falsos.
+A rotina publica dados **no branch separado `ofertix-catalog`**, não modifica a branch `main`, portanto **não faz deploy no Render a cada atualização do catálogo**. O Render lê a lista pública com cache de 5 minutos. As ofertas expiram automaticamente 24 horas depois da última geração. Sem feed autorizado, não são publicados produtos fictícios. Carraro BR é exceção à regra de promoção, mas seus itens são identificados como catálogo sem desconto.
 
 Nos feeds Awin padrão, o campo `product_price_old` é usado como referência do desconto quando o anunciante o fornece (não confundir com `rrp_price`). Nos feeds Google da Awin, o desconto precisa ser demonstrado por `sale_price` menor que `price`, ambos em BRL. Descontos vindos do feed aparecem identificados como valores informados pela loja, não verificados independentemente. O sistema não garante disponibilidade, frete ou comissão.
 
