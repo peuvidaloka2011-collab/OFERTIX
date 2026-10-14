@@ -18,7 +18,7 @@ CATALOG_URL = (
 )
 MAX_CATALOG_BYTES = 5 * 1024 * 1024
 CACHE_SECONDS = 300
-_CACHE = {"at": 0.0, "offers": [], "expires_at": None}
+_CACHE = {"at": 0.0, "offers": [], "carraro": [], "expires_at": None}
 _LOCK = threading.Lock()
 _ALLOWED_AFFILIATE_HOSTS = frozenset({"www.awin1.com", "awin1.com"})
 
@@ -119,6 +119,7 @@ def get_offers(min_discount=10):
         if _CACHE["at"] and now_mono - _CACHE["at"] < CACHE_SECONDS:
             return [x for x in _CACHE["offers"] if x["discount_percent"] >= min_discount] if valid_cache else []
         offers = []
+        carraro = []
         expires_at = None
         try:
             req = urllib.request.Request(
@@ -132,14 +133,76 @@ def get_offers(min_discount=10):
             payload = json.loads(raw.decode("utf-8"))
             expires_at = _parse_utc(payload.get("expires_at")) if isinstance(payload, dict) else None
             offers = read_catalog(payload, min_discount=1)
+            carraro = read_carraro_catalog(payload)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
                 OSError, ValueError, UnicodeError, json.JSONDecodeError):
             # Falha de rede: retorna cache anterior, se ainda nao estiver expirado;
             # a validade e avaliada a cada nova consulta periodica.
             offers = _CACHE["offers"] if valid_cache else []
+            carraro = _CACHE["carraro"] if valid_cache else []
             expires_at = _CACHE["expires_at"] if valid_cache else None
-        _CACHE.update(at=now_mono, offers=offers, expires_at=expires_at)
+        _CACHE.update(at=now_mono, offers=offers, carraro=carraro, expires_at=expires_at)
         if expires_at is None or datetime.now(timezone.utc) >= expires_at:
             return []
         return [x for x in offers if x["discount_percent"] >= min_discount]
 
+
+
+def read_carraro_catalog(payload, *, now=None):
+    """Lê todos os produtos Carraro BR com preço normal (sem inventar desconto).
+
+    Indisponíveis continuam no catálogo, mas a interface não permite comprá-los.
+    """
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return []
+    now=now or datetime.now(timezone.utc)
+    updated=_parse_utc(payload.get("generated_at"))
+    expiry=_parse_utc(payload.get("expires_at"))
+    if updated is None or expiry is None or not updated <= now < expiry:
+        return []
+    rows=payload.get("carraro_products", [])
+    if not isinstance(rows, list) or len(rows)>4000:
+        return []
+    results=[]
+    ids=set()
+    for item in rows:
+        if not isinstance(item,dict):
+            continue
+        pid=item.get("id")
+        title=item.get("title")
+        if not isinstance(pid,str) or not 0<len(pid)<=80 or pid in ids:
+            continue
+        if item.get("merchant")!="Carraro BR":
+            continue
+        if not isinstance(title,str) or not 5<=len(title)<=180:
+            continue
+        if type(item.get("in_stock")) is not bool:
+            continue
+        if not _secure_url(item.get("affiliate_url"),_ALLOWED_AFFILIATE_HOSTS):
+            continue
+        if not _secure_url(item.get("image")):
+            continue
+        try:
+            price=float(item["price"])
+        except (KeyError,TypeError,ValueError,OverflowError):
+            continue
+        if not math.isfinite(price) or not 0<price<=1000000:
+            continue
+        ids.add(pid)
+        results.append({
+            "id":"awin_"+pid,"merchant":"Carraro BR","title":title.strip(),
+            "category":str(item.get("category") or "Móveis e Casa")[:70],
+            "price":round(price,2),"image":item["image"],
+            "affiliate_url":item["affiliate_url"],"in_stock":item["in_stock"],
+            "pricing_source":"affiliate_catalog","verified_discount":False,
+        })
+    return sorted(results,key=lambda p:(not p["in_stock"],p["title"].casefold()))
+
+
+def get_carraro_products():
+    """Usa o mesmo cache de 5 minutos e validade de 24h das promoções."""
+    get_offers(min_discount=1)
+    with _LOCK:
+        if _CACHE["expires_at"] is None or datetime.now(timezone.utc)>=_CACHE["expires_at"]:
+            return []
+        return list(_CACHE["carraro"])
