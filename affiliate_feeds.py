@@ -267,7 +267,7 @@ def parse_google_csv(text, minimum_discount=10):
     """Converte feeds Awin no esquema Google Merchant.
 
     Sem sale_price: nao anuncia desconto, mas inclui o produto Carraro BR
-    no catalogo separado quando autorizado. Preco em BRL, estoque real,
+    no catalogo separado; os indisponiveis ficam sinalizados. Preco em BRL, estoque real,
     imagem HTTPS e deep link rastreavel obrigatorios.
     """
     if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_CSV_BYTES:
@@ -288,7 +288,13 @@ def parse_google_csv(text, minimum_discount=10):
             continue
         if (row.get("adult") or "").strip().lower() in ("yes", "true", "1"):
             continue
-        if (row.get("availability") or "").strip().lower() != "in_stock":
+        availability=(row.get("availability") or "").strip().lower()
+        merchant_id=(row.get("advertiser_id") or "").strip()
+        is_carraro=merchant_id=="81383" and (row.get("advertiser_name") or "").strip().lower()=="carraro br"
+        if availability not in ("in_stock", "out_of_stock"):
+            continue
+        # Outros anunciantes so entram quando podem vender.
+        if availability!="in_stock" and not is_carraro:
             continue
         regular_price, currency = _google_price(row.get("price"))
         if regular_price is None or currency != "BRL":
@@ -304,7 +310,6 @@ def parse_google_csv(text, minimum_discount=10):
         if not _safe_url(affiliate,AWIN_LINK_HOSTS) or not _valid_image(image):
             continue
         merchant=(row.get("advertiser_name") or "").strip()[:70]
-        merchant_id=(row.get("advertiser_id") or "").strip()
         product_id=(row.get("id") or "").strip()
         title=(row.get("title") or "").strip()[:160]
         if not merchant_id.isdigit() or not merchant or not product_id or len(product_id)>100 or len(title)<5:
@@ -316,7 +321,7 @@ def parse_google_csv(text, minimum_discount=10):
         current=sale_price if sale_price is not None else regular_price
         item={"id":ident,"merchant":merchant,"title":title,"category":category,
               "price":round(current,2),"affiliate_url":affiliate,"image":image}
-        if sale_price is not None and sale_price < regular_price:
+        if availability=="in_stock" and sale_price is not None and sale_price < regular_price:
             percentage=round((regular_price-sale_price)*100/regular_price,2)
             if percentage >= minimum_discount:
                 discounts[ident]={**item,"original_price":regular_price,
@@ -325,8 +330,8 @@ def parse_google_csv(text, minimum_discount=10):
                     raise ValueError("Feed possui mais promocoes que o limite.")
         # Excecao solicitada: exibir todos os produtos Carraro BR em estoque,
         # identificados como catalogo comum, mesmo sem desconto.
-        if merchant_id == "81383" and merchant.lower() == "carraro br":
-            carraro[ident]=item
+        if is_carraro:
+            carraro[ident]={**item, "in_stock": availability=="in_stock"}
             if len(carraro)>MAX_OFFERS:
                 raise ValueError("Catalogo Carraro maior que o limite.")
     if not scanned:
