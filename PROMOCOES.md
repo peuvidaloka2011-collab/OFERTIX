@@ -176,6 +176,19 @@ Foco: contas somente de afiliado não conseguem consultar preços de anúncios d
 ### Antes da operação pública
 
 **Render Free usa disco efêmero:** reinício/deploy pode apagar ofertas e imagens manuais, e os tokens OAuth. Migrar para armazenamento persistente antes de depender de vendas, relatórios ou acessos constantes. O servidor pode hibernar; a validade é aplicada na leitura, mas solicitações podem demorar a iniciar. Link de afiliado não é garantia de comissão nem de preço.
+## V13: preencher campos a partir do link oficial do produto
+
+O novo botão **Preencher dados pelo link** no cadastro manual (`/admin`) consulta dados de produto usando apenas fontes oficiais permitidas. Não salva nem publica automaticamente: o administrador precisa conferir e confirmar os dados antes de clicar em Salvar.
+
+- Aceita URL de produto `.../p/MLB...`, anúncio individual `.../MLB-...` ou atalho `meli.la` que realmente redirecione a um produto. Limita os redirecionamentos a até 5, HTTPS e domínios conhecidos do Mercado Livre; bloqueia URLs externas, de perfil social e painel de afiliados.
+- Em produtos de catálogo, tenta **GET /products/{id}** com a autorização já configurada. Pode sugerir nome e foto oficial do `mlstatic.com`, mas jamais supõe preço ou desconto pelo resultado do catálogo.
+- Se OAuth estiver desconectado, pode sugerir o nome **a partir do caminho URL** com indicação explícita de que não foi confirmado pela API; foto e preços ficam vazios.
+- Em anúncio individual, tenta **GET /items/{id}** e, se permitido, **GET /items/{id}/sale_price?context=channel_marketplace**. Preço atual pode ser sugerido por `/items`, mas desconto só é tratado como confirmado quando a API de venda confirma preço atual, preço original e desconto mínimo sob a regra existente.
+- HTTP 401/403 mantém os campos indisponíveis para revisão manual; não há scraping nem tentativa de contornar restrições de API. O servidor informa apenas o código HTTP, sem expor respostas com tokens.
+- A interface indica se nome veio da API ou foi inferido do endereço; se imagem veio da API; se desconto foi confirmado ou não. Sugere validade inicial de 12 horas se estiver vazia. Mudar o link desmarca a confirmação administrativa.
+- A operação de sugestão é protegida pela senha administrativa e **não escreve no banco**. A publicação manual ainda exige todos os campos obrigatórios, link oficial do produto, confirmação de preço real e validade de até 72 horas.
+
+**Atenção:** links de perfil social criados pelo Gerador de produtos recomendados podem apontar para uma página de recomendações; não são links de produto individual. O usuário deve gerar um link oficial para o produto e verificar seu rastreamento. A consulta da API não garante comissões. O SQLite efêmero no Render Free continua inadequado para operação comercial sem persistência.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
