@@ -1,0 +1,45 @@
+name: OFERTIX - Catálogo automático de afiliados
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  importar-ofertas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Importar ofertas autorizadas da Awin
+        env:
+          OFERTIX_AWIN_FEED_URLS: ${{ secrets.OFERTIX_AWIN_FEED_URLS }}
+        run: python scripts/sync_awin_catalog.py --output "$RUNNER_TEMP/catalog_awin.json"
+      - name: Publicar catálogo em branch separado do Render
+        shell: bash
+        run: |
+          if [ ! -f "$RUNNER_TEMP/catalog_awin.json" ]; then
+            echo "Feed não configurado. Nenhuma alteração publicada."
+            exit 0
+          fi
+          git config user.name "OFERTIX Catalog Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin ofertix-catalog
+          git checkout -B ofertix-catalog origin/ofertix-catalog
+          cp "$RUNNER_TEMP/catalog_awin.json" catalog_awin.json
+          git add catalog_awin.json
+          if git diff --cached --quiet; then
+            echo "Catálogo sem alterações."
+          else
+            git commit -m "Atualizar catálogo de ofertas de afiliados"
+            git push origin HEAD:ofertix-catalog
+          fi
