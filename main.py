@@ -26,6 +26,9 @@ INTERVAL_HOURS = max(1, min(24, int(os.getenv("OFERTIX_SYNC_HOURS", "6"))))
 CATEGORIES = [c.strip().upper() for c in os.getenv("OFERTIX_CATEGORIES", "").split(",") if re.fullmatch(r"MLB\d+", c.strip().upper())]
 IMPORT_LOCK = threading.Lock()
 LAST_SYNC = {"time": None, "status": "aguardando configuracao", "details": []}
+IMPORT_STATUS_LOCK = threading.Lock()
+IMPORT_STATUS = {"running": False, "category": None, "result": None, "error": None,
+                 "started_at": None, "finished_at": None}
 VALID_ID = re.compile(r"MLB\d+")
 
 
@@ -197,49 +200,99 @@ def category_details(category):
     }
 
 
-def ranked_item_candidates(entry):
-    """Traduz ITEM/PRODUCT/USER_PRODUCT em IDs de anúncios MLB, nunca em links imaginários.
+def resolve_user_product(up_id):
+    """USER_PRODUCT normalmente representa anúncios do vendedor; nunca criar item fictício."""
+    if not re.fullmatch(r"MLBU\d+", up_id):
+        return []
+    user_product = ml_api("/user-products/" + up_id)
+    if not isinstance(user_product, dict):
+        return []
+    user_id = str(user_product.get("user_id") or "")
+    if not user_id.isdecimal() or not 0 < int(user_id) < 10**18:
+        return []
+    search = ml_api("/users/" + user_id + "/items/search?user_product_id=" + up_id)
+    if not isinstance(search, dict) or not isinstance(search.get("results"), list):
+        return []
+    found = []
+    for entry in search["results"]:
+        item_id = str(entry).upper()
+        if VALID_ID.fullmatch(item_id) and item_id not in found:
+            found.append(item_id)
+        if len(found) >= 2:
+            break
+    return found
 
-    PRODUCT: produto de catálogo -> anúncio vencedor (buy_box_winner.item_id).
-    USER_PRODUCT: produto de vendedor -> user_id -> anúncios do próprio vendedor.
-    Alguns vendedores/recursos podem negar acesso (403); tratar como não resolvido.
+
+def resolve_catalog_product(product_id, depth=0, visited=None):
+    """Segue uma pequena amostra de variantes quando um pai nao possui buy box.
+
+    A API permite produtos-pai inativos com filhos compraveis. Limitamos o numero
+    de chamadas para nao percorrer arbitrariamente a arvore inteira.
+    """
+    if not VALID_ID.fullmatch(product_id):
+        return []
+    if visited is None:
+        visited = set()
+    if product_id in visited or len(visited) >= 7 or depth > 2:
+        return []
+    visited.add(product_id)
+    product = ml_api("/products/" + product_id)
+    if not isinstance(product, dict):
+        return []
+    if product.get("status") == "active":
+        winner = product.get("buy_box_winner")
+        item_id = str(winner.get("item_id", "")).upper() if isinstance(winner, dict) else ""
+        if VALID_ID.fullmatch(item_id):
+            return [item_id]
+    # Nao deduzir preco do parent; percorrer somente folhas com anuncio real.
+    children = [
+        str(item).upper() for item in (product.get("children_ids") or [])
+        if VALID_ID.fullmatch(str(item).upper())
+    ]
+    if not children:
+        for picker in (product.get("pickers") or []):
+            if not isinstance(picker, dict):
+                continue
+            for option in picker.get("products") or []:
+                if not isinstance(option, dict):
+                    continue
+                child = str(option.get("product_id", "")).upper()
+                if VALID_ID.fullmatch(child) and child != product_id:
+                    children.append(child)
+    # Limitar: no maximo 4 filhos por nivel, 7 consultas totais.
+    found = []
+    for child in dict.fromkeys(children[:4]):
+        if len(visited) >= 7:
+            break
+        try:
+            for item_id in resolve_catalog_product(child, depth + 1, visited):
+                if item_id not in found:
+                    found.append(item_id)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (403, 404):
+                raise
+        if len(found) >= 2:
+            break
+    return found[:2]
+
+
+def ranked_item_candidates(entry):
+    """Traduz ranking de ITEM, PRODUCT e USER_PRODUCT em anúncios MLB reais.
+
+    O endpoint /highlights documenta inclusive ITEM com identificador MLBU.
     """
     kind = str(entry.get("type", "")).upper()
     ranked_id = str(entry.get("id", "")).upper()
     if kind == "ITEM":
-        return [ranked_id] if VALID_ID.fullmatch(ranked_id) else []
+        if VALID_ID.fullmatch(ranked_id):
+            return [ranked_id]
+        if re.fullmatch(r"MLBU\d+", ranked_id):
+            return resolve_user_product(ranked_id)
+        return []
     if kind == "PRODUCT":
-        if not VALID_ID.fullmatch(ranked_id):
-            return []
-        product = ml_api("/products/" + ranked_id)
-        if not isinstance(product, dict) or product.get("status") != "active":
-            return []
-        winner = product.get("buy_box_winner") or {}
-        item_id = str(winner.get("item_id", "")).upper() if isinstance(winner, dict) else ""
-        return [item_id] if VALID_ID.fullmatch(item_id) else []
+        return resolve_catalog_product(ranked_id)
     if kind == "USER_PRODUCT":
-        if not re.fullmatch(r"MLBU\d+", ranked_id):
-            return []
-        user_product = ml_api("/user-products/" + ranked_id)
-        if not isinstance(user_product, dict):
-            return []
-        user_id = str(user_product.get("user_id", ""))
-        if not user_id.isdecimal() or not 0 < int(user_id) < 10**18:
-            return []
-        search = ml_api(
-            "/users/" + user_id + "/items/search?user_product_id=" + ranked_id
-        )
-        if not isinstance(search, dict) or not isinstance(search.get("results"), list):
-            return []
-        # Limitar chamadas: 2 anúncios por produto de usuário, sem buscar vendedores terceiros.
-        found = []
-        for candidate in search["results"]:
-            item_id = str(candidate).upper()
-            if VALID_ID.fullmatch(item_id) and item_id not in found:
-                found.append(item_id)
-            if len(found) >= 2:
-                break
-        return found
+        return resolve_user_product(ranked_id)
     return []
 
 
@@ -297,8 +350,8 @@ def import_category(category):
                 continue
 
             if not candidates:
-                if kind != "ITEM":
-                    catalog_unresolved += 1
+                # Inclui ITEM com identificador MLBU documentado no ranking.
+                catalog_unresolved += 1
                 continue
             if kind != "ITEM":
                 resolved_catalog += 1
@@ -345,6 +398,11 @@ def import_category(category):
             "resolved_catalog": resolved_catalog,
             "catalog_unresolved": catalog_unresolved,
             "catalog_errors": catalog_errors,
+            "unresolved_entries": catalog_unresolved,
+            "item_mlbu_entries": sum(
+                1 for entry in ranking
+                if entry.get("type") == "ITEM" and str(entry.get("id", "")).startswith("MLBU")
+            ),
             # Legacy field name retained to avoid breaking older dashboard clients.
             "catalog_types_not_supported": catalog_unresolved + catalog_errors,
             "duplicate_items_skipped": repeated,
@@ -352,6 +410,32 @@ def import_category(category):
             "diagnostics": reasons,
             "message": message,
         }
+
+
+def import_in_background(category):
+    """Executa consulta demorada fora da requisicao HTTP. Nunca expoe OAuth."""
+    global IMPORT_STATUS
+    try:
+        result = import_category(category)
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": result, "error": None,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
+    except urllib.error.HTTPError as exc:
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": None,
+                "error": "Mercado Livre respondeu HTTP " + str(exc.code),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
+    except Exception as exc:
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": None,
+                "error": "Falha na importacao: " + type(exc).__name__,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
 
 
 def refresh_linked_items():
@@ -521,6 +605,11 @@ class Handler(BaseHTTPRequestHandler):
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
                 "total": total, "published": published, "last_sync": LAST_SYNC,
             })
+        if path == "/api/admin/import/status":
+            if not self.is_admin():
+                return
+            with IMPORT_STATUS_LOCK:
+                return self.respond(200, dict(IMPORT_STATUS))
         if path == "/api/admin/category":
             if not self.is_admin():
                 return
@@ -571,7 +660,20 @@ class Handler(BaseHTTPRequestHandler):
                 if not TOKEN and not oauth_ml.connected(DB):
                     return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
                 category = str(body.get("category", "")).strip().upper()
-                return self.respond(200, import_category(category))
+                if not re.fullmatch(r"MLB\d+", category):
+                    return self.respond(400, {"error": "Informe um ID de categoria MLB valido."})
+                global IMPORT_STATUS
+                with IMPORT_STATUS_LOCK:
+                    if IMPORT_STATUS["running"]:
+                        return self.respond(409, {"error": "Ja existe importacao em andamento."})
+                    IMPORT_STATUS = {
+                        "running": True, "category": category, "result": None, "error": None,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": None,
+                    }
+                threading.Thread(target=import_in_background, args=(category,),
+                                 daemon=True, name="ofertix-import-manual").start()
+                return self.respond(202, {"started": True, "category": category})
             if path == "/api/admin/refresh":
                 if not TOKEN and not oauth_ml.connected(DB):
                     return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})

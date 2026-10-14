@@ -90,22 +90,40 @@ async function browseCategory(){
 }
 async function importCategory(){
   const id=$("category").value.trim().toUpperCase();
-  $("import").disabled=true;importInfo("Consultando produtos e preços para "+id+". Aguarde...");$("subcategories").replaceChildren();
+  $("import").disabled=true;
+  importInfo("Iniciando importação de "+id+"...");
+  $("subcategories").replaceChildren();
   try{
-    const data=await request("/api/admin/import",{method:"POST",body:JSON.stringify({category:id})});
+    const ack=await request("/api/admin/import",{method:"POST",body:JSON.stringify({category:id})});
+    if(!ack.started)throw Error("Servidor não confirmou o início da consulta.");
+    let data=null;
+    for(let step=0;step<120;step++){
+      await new Promise(resolve=>setTimeout(resolve,3000));
+      const status=await request("/api/admin/import/status");
+      if(status.category!==id)throw Error("Outra importação foi iniciada.");
+      if(!status.running){
+        if(status.error)throw Error(status.error);
+        data=status.result;break;
+      }
+      importInfo("Mercado Livre: analisando ranking e variantes de "+id+"...\nTempo de espera: "+((step+1)*3)+" segundos. Mantenha esta página aberta.");
+    }
+    if(!data)throw Error("A importação ultrapassou o tempo de espera. Verifique o status no painel.");
     renderSubcategories(data);
     if(data.requires_subcategory){
       importInfo(data.message+" Toque nas subcategorias abaixo.");
     }else if(data.ranking_unavailable){
       importInfo(data.message,true);
     }else{
+      const kinds=data.ranking_types||{};
       importInfo("Verificação concluída!\nEntradas no ranking: "+(data.ranking_entries??0)+
+        "\nTipos encontrados: ITEM "+(kinds.ITEM??0)+", PRODUCT "+(kinds.PRODUCT??0)+", USER_PRODUCT "+(kinds.USER_PRODUCT??0)+
+        "\nITEM com identificador MLBU: "+(data.item_mlbu_entries??0)+
         "\nAnúncios encontrados e analisados: "+data.checked+
         "\nProdutos de catálogo convertidos em anúncios: "+(data.resolved_catalog??0)+
         "\nPromoções com desconto confirmado: "+data.promotions+
         "\nAnúncios sem desconto de 10%: "+data.without_discount+
         "\nFalhas nas consultas dos anúncios: "+data.failed+
-        "\nProdutos de catálogo sem anúncio acessível: "+(data.catalog_unresolved??0)+
+        "\nEntradas sem anúncio acessível: "+(data.unresolved_entries??data.catalog_unresolved??0)+
         "\nFalhas de acesso ao catálogo: "+(data.catalog_errors??0)+
         (Array.isArray(data.diagnostics)&&data.diagnostics.length?"\nDetalhes: "+data.diagnostics.join("; "):"")+
         "\n"+(data.message||""), Boolean((data.catalog_errors||data.failed) && !data.checked));
