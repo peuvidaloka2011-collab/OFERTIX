@@ -41,6 +41,53 @@ class PromotionsTest(unittest.TestCase):
         self.assertIsNone(main.verified_promotion(self.item(status="paused"), self.sale()))
         self.assertIsNone(main.verified_promotion(self.item(), self.sale(92, 100), threshold=10))
 
+    def test_parent_category_shows_subcategories_instead_of_failing(self):
+        def fake_api(path):
+            self.assertEqual(path, "/categories/MLB1051")
+            return {"name": "Celulares e Telefones", "children_categories": [
+                {"id": "MLB10001", "name": "Celulares"},
+                {"id": "MLB10002", "name": "Acessorios"}
+            ]}
+        with patch.object(main, "ml_api", side_effect=fake_api):
+            result = main.import_category("MLB1051")
+        self.assertTrue(result["requires_subcategory"])
+        self.assertEqual(result["checked"], 0)
+        self.assertEqual(result["subcategories"][0]["id"], "MLB10001")
+
+    def test_final_category_counts_catalog_types_without_inventing_offers(self):
+        def fake_api(path):
+            if path.startswith("/categories/"):
+                return {"name": "Fones", "children_categories": []}
+            if path.startswith("/highlights/"):
+                return {"content": [
+                    {"type": "USER_PRODUCT", "id": "MLBU123", "position": 1},
+                    {"type": "PRODUCT", "id": "MLB987", "position": 2}
+                ]}
+            raise AssertionError("Nao deveria consultar itens de catalogo sem resolucao: " + path)
+        with patch.object(main, "ml_api", side_effect=fake_api):
+            result = main.import_category("MLB432825")
+        self.assertEqual(result["checked"], 0)
+        self.assertEqual(result["catalog_types_not_supported"], 2)
+        self.assertIn("catalogo", result["message"])
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0], 0)
+
+    def test_final_category_imports_verified_item(self):
+        def fake_api(path):
+            if path.startswith("/categories/"):
+                return {"name": "Fones", "children_categories": []}
+            if path.startswith("/highlights/"):
+                return {"content": [{"type": "ITEM", "id": "MLB55555", "position": 1}]}
+            if path.endswith("/sale_price?context=channel_marketplace"):
+                return self.sale()
+            if path.startswith("/items/"):
+                return self.item()
+            raise AssertionError(path)
+        with patch.object(main, "ml_api", side_effect=fake_api):
+            result = main.import_category("MLB432825")
+        self.assertEqual(result["promotions"], 1)
+        self.assertEqual(result["checked"], 1)
+
     def test_valid_affiliate_domains(self):
         self.assertTrue(main.allowed_affiliate_link("https://mercadolivre.com/sec/abc"))
         self.assertTrue(main.allowed_affiliate_link("https://meli.la/abc"))

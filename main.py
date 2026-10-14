@@ -175,16 +175,61 @@ def verify_and_save(item_id, category, ranking=999):
     return bool(promo)
 
 
+def category_details(category):
+    """Consulta a arvore oficial; rankings so aceitam categorias finais."""
+    category = str(category).strip().upper()
+    if not re.fullmatch(r"MLB\d+", category):
+        raise ValueError("Codigo de categoria invalido. Use um ID MLB numerico.")
+    info = ml_api("/categories/" + category)
+    if not isinstance(info, dict) or "children_categories" not in info:
+        raise ValueError("A API nao retornou dados suficientes da categoria.")
+    children = [
+        {"id": x["id"], "name": x.get("name", x["id"])}
+        for x in (info.get("children_categories") or [])
+        if isinstance(x, dict) and re.fullmatch(r"MLB\d+", str(x.get("id", "")))
+    ]
+    return {
+        "id": category,
+        "name": info.get("name", category),
+        "is_final": not bool(children),
+        "subcategories": children[:35],
+        "subcategories_total": len(children),
+    }
+
+
 def import_category(category):
     category = str(category).upper().strip()
-    if not re.fullmatch(r"MLB\d+", category):
-        raise ValueError("Categoria invalida. Informe um ID como MLB1051.")
+    details = category_details(category)
+    if not details["is_final"]:
+        return {
+            **details, "checked": 0, "promotions": 0,
+            "requires_subcategory": True,
+            "message": "Essa categoria tem subdivisoes. Escolha uma subcategoria ate chegar a uma categoria final, e tente importar novamente.",
+        }
     with IMPORT_LOCK:
-        highlights = ml_api("/highlights/MLB/category/" + category)
+        try:
+            highlights = ml_api("/highlights/MLB/category/" + category)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                return {
+                    "category": category, "checked": 0, "promotions": 0,
+                    "ranking_unavailable": True,
+                    "message": "Essa categoria final nao possui um ranking de mais vendidos disponivel no Mercado Livre.",
+                }
+            raise
+        content = highlights.get("content", [])
+        if not isinstance(content, list):
+            raise ValueError("O ranking retornou um formato inesperado.")
         ranked = [
-            obj for obj in highlights.get("content", [])
-            if obj.get("type") == "ITEM" and VALID_ID.fullmatch(str(obj.get("id", "")))
+            obj for obj in content
+            if isinstance(obj, dict)
+            and obj.get("type") == "ITEM"
+            and VALID_ID.fullmatch(str(obj.get("id", "")))
         ]
+        type_counts = {
+            kind: sum(1 for obj in content if isinstance(obj, dict) and obj.get("type") == kind)
+            for kind in ("ITEM", "PRODUCT", "USER_PRODUCT")
+        }
         verified, discarded, failed = 0, 0, 0
         for entry in ranked[:20]:
             item_id = entry["id"]
@@ -199,7 +244,15 @@ def import_category(category):
         return {
             "category": category, "checked": len(ranked[:20]), "promotions": verified,
             "without_discount": discarded, "failed": failed,
-            "catalog_types_not_supported": len(highlights.get("content", [])) - len(ranked),
+            "catalog_types_not_supported": len(content) - len(ranked),
+            "ranking_types": type_counts,
+            "message": (
+                "O ranking retornou apenas produtos de catalogo (PRODUCT/USER_PRODUCT). "
+                "Esses IDs ainda precisam de resolucao para anuncios antes da consulta de precos."
+                if not ranked and content else
+                "A verificacao terminou. Promocoes validas so aparecem ao publico depois que "
+                "voce associar seus links oficiais de afiliado."
+            ),
         }
 
 
@@ -370,6 +423,19 @@ class Handler(BaseHTTPRequestHandler):
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
                 "total": total, "published": published, "last_sync": LAST_SYNC,
             })
+        if path == "/api/admin/category":
+            if not self.is_admin():
+                return
+            query = parse_qs(urlparse(self.path).query)
+            category = query.get("id", [""])[0].strip().upper()
+            try:
+                return self.respond(200, category_details(category))
+            except ValueError as exc:
+                return self.respond(400, {"error": str(exc)})
+            except urllib.error.HTTPError as exc:
+                return self.respond(502, {"error": "A API Mercado Livre retornou HTTP " + str(exc.code) + " ao consultar categorias."})
+            except Exception:
+                return self.respond(502, {"error": "Falha ao consultar categorias do Mercado Livre."})
         if path == "/api/admin/products":
             if not self.is_admin():
                 return
@@ -420,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError) as exc:
             return self.respond(400, {"error": str(exc)})
         except urllib.error.HTTPError as exc:
-            return self.respond(502, {"error": "Mercado Livre retornou HTTP " + str(exc.code) + ". Verifique token e permissao."})
+            return self.respond(502, {"error": "Mercado Livre retornou HTTP " + str(exc.code) + ". Confira codigo de categoria, permissao e disponibilidade do ranking."})
         except Exception as exc:
             return self.respond(500, {"error": "Falha na operacao: " + type(exc).__name__})
 
