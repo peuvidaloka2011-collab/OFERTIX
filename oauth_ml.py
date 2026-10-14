@@ -202,5 +202,7 @@ def access_token(db_path):
             "client_secret": config["ML_CLIENT_SECRET"],
             "refresh_token": refresh,
         })
+        if not response.get("refresh_token"):
+            raise OAuthFlowError("O Mercado Livre nao devolveu um novo Refresh Token. Reconecte a conta.")
         updated = _save_token(db_path, response)
         return updated["access_token"]
