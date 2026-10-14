@@ -40,6 +40,45 @@ a{color:#09683d}#app{display:none}
 <p>Autorize a conta Mercado Livre vinculada à aplicação OFERTIX. A autorização usa PKCE e senha administrativa; nenhum token aparece no navegador.</p>
 <div class="row"><button id="oauth">Preparar autorização</button><a id="oauthLink" style="display:none" target="_blank" rel="noopener noreferrer" href="#">Autorizar Mercado Livre ↗</a></div>
 <p class="muted">Depois de autorizar, volte para esta aba e toque em Atualizar painel. Esta versão de testes usa armazenamento temporário no Render Free.</p></section>
+<section class="panel" id="manual">
+<h2>OFERTIX V12 — Cadastrar promoção manual</h2>
+<p>Para sua conta de afiliado: adicione nome, foto, preços e link de <b>um produto</b> gerado na Central de Afiliados. Você não precisa de acesso à API de preços.</p>
+<p class="muted">Preços e descontos informados por você serão identificados na vitrine como <b>não verificados automaticamente</b>. Não use links para seu perfil social ou a página inicial.</p>
+<input id="manualId" type="hidden">
+<div class="grid">
+  <label>Nome do produto <input id="manualTitle" placeholder="Ex.: Caixa de Som AIWA" maxlength="140" style="width:100%"></label>
+  <label>Categoria <input id="manualCategory" placeholder="Ex.: Eletrônicos" maxlength="50" style="width:100%"></label>
+  <label>Preço atual (R$) <input id="manualPrice" type="number" inputmode="decimal" min=".01" step=".01" placeholder="1471.00" style="width:100%"></label>
+  <label>Preço anterior (R$) <input id="manualOriginal" type="number" inputmode="decimal" min=".01" step=".01" placeholder="2299.00" style="width:100%"></label>
+</div>
+<p><label style="display:block">Link oficial de afiliado do produto <input id="manualLink" type="url" placeholder="https://meli.la/..." style="width:100%"></label></p>
+<div class="grid">
+  <label>Foto do produto (JPG, PNG ou WebP)
+    <input id="manualImageFile" type="file" accept="image/jpeg,image/png,image/webp" style="width:100%">
+  </label>
+  <label>Ou URL da imagem (mlstatic.com)
+    <input id="manualImageUrl" type="url" placeholder="https://http2.mlstatic.com/..." style="width:100%">
+  </label>
+</div>
+<p class="muted">Ao escolher uma foto, o navegador a comprime antes de enviar. Use uma imagem que você tenha autorização para divulgar.</p>
+<div class="grid">
+  <label>Início da divulgação (opcional, agora se vazio)
+    <input id="manualStart" type="datetime-local" style="width:100%">
+  </label>
+  <label>Validade da oferta (obrigatória; máximo 72 horas)
+    <input id="manualEnd" type="datetime-local" style="width:100%">
+  </label>
+</div>
+<p><label><input id="manualConfirm" type="checkbox"> Confirmei agora o preço e o link de afiliado oficial do produto. Entendo que essa oferta não foi verificada pela API.</label></p>
+<div class="row">
+  <button id="manualSave" type="button">Salvar e programar oferta</button>
+  <button id="manualClear" class="secondary" type="button">Limpar cadastro</button>
+</div>
+<p id="manualFeedback" class="feedback" role="status">Você pode agendar a oferta. Ela aparece e desaparece automaticamente na vitrine conforme as datas, enquanto o servidor estiver acessível.</p>
+<h3>Minhas ofertas manuais</h3>
+<div class="table-scroll"><table><thead><tr><th>Produto</th><th>Preço</th><th>Status</th><th>Ação</th></tr></thead><tbody id="manualRows"></tbody></table></div>
+<p class="muted">Atenção: a versão atual usa SQLite temporário no Render Free. É necessário migrar para um banco persistente antes de divulgar em escala.</p>
+</section>
 <section class="panel"><h2>Importar produtos populares</h2><p>Informe uma categoria final do Mercado Livre. Se usar uma categoria ampla, como <code>MLB1051</code>, toque em <b>Buscar subcategorias</b> e escolha uma opção até chegar à categoria final. A verificação só publica promoções com desconto confirmado e link oficial de afiliado.</p>
 <div class="row"><input id="category" placeholder="ID da categoria (MLB...)" value="MLB1051" autocapitalize="characters"><button id="import">Importar e verificar</button><button id="browse" class="secondary">Buscar subcategorias</button><button id="diagnose" class="secondary">Diagnosticar catálogo</button><button id="refresh" class="secondary">Revalidar ofertas</button></div>
 <p id="importFeedback" class="feedback" role="status">Escolha uma categoria final. O resultado da importação aparecerá aqui.</p>
@@ -159,6 +198,7 @@ async function importCategory(){
 async function load(){
   const [s,p]=await Promise.all([request("/api/admin/status"),request("/api/admin/products")]);
   $("app").style.display="block";$("login").style.display="none";
+  await loadManual();
   $("total").textContent=s.total;$("published").textContent=s.published;
   $("min").textContent=s.min_discount+"%";$("token").textContent=s.oauth_connected?"OAuth conectado":(s.token_configured?"Token manual":"Pendente");
   $("oauth").disabled=!s.oauth_ready;
@@ -183,6 +223,117 @@ async function op(path,body,msg){
   info("Processando, aguarde...");
   try{const data=await request(path,{method:"POST",body:JSON.stringify(body)});info(msg+"\n"+JSON.stringify(data,null,2));await load();}
   catch(e){info("Erro: "+e.message);}
+}
+function toUTCfromLocal(id){
+  const value=$(id).value;
+  if(!value)return null;
+  const dt=new Date(value);
+  if(!Number.isFinite(dt.getTime()))throw Error("Data e hora inválidas em "+id);
+  return dt.toISOString();
+}
+function toLocalInput(value){
+  if(!value)return "";
+  const dt=new Date(value);
+  const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000);
+  return local.toISOString().slice(0,16);
+}
+let uploadedImage="";
+async function compressProductPhoto(file){
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type))throw Error("Selecione imagem JPG, PNG ou WebP.");
+  if(file.size>8*1024*1024)throw Error("A foto original deve ter no máximo 8 MB.");
+  const img=new Image();
+  const objectURL=URL.createObjectURL(file);
+  try{
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(new Error("A foto não pôde ser lida."));img.src=objectURL;});
+    const canvas=document.createElement("canvas");
+    const ratio=Math.min(1,480/Math.max(img.naturalWidth,img.naturalHeight));
+    canvas.width=Math.max(1,Math.floor(img.naturalWidth*ratio));
+    canvas.height=Math.max(1,Math.floor(img.naturalHeight*ratio));
+    const context=canvas.getContext("2d");
+    if(!context)throw Error("Navegador não suporta compressão de foto.");
+    context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);
+    context.drawImage(img,0,0,canvas.width,canvas.height);
+    for(const quality of [.7,.55,.42,.3]){
+      const data=canvas.toDataURL("image/jpeg",quality);
+      if(data.length<73000)return data;
+    }
+    throw Error("Não foi possível reduzir a foto. Escolha uma imagem menor.");
+  }finally{URL.revokeObjectURL(objectURL);}
+}
+$("manualImageFile").addEventListener("change",()=>{uploadedImage="";});
+function clearManual(){
+  for(const id of ["manualId","manualTitle","manualPrice","manualOriginal","manualLink","manualImageUrl","manualStart","manualEnd"]){$(id).value="";}
+  $("manualCategory").value="Eletrônicos";$("manualImageFile").value="";
+  $("manualConfirm").checked=false;uploadedImage="";
+  $("manualFeedback").textContent="Cadastro limpo. Informe uma promoção real para criar outra oferta.";
+}
+$("manualClear").addEventListener("click",clearManual);
+$("manualSave").addEventListener("click",async()=>{
+  const button=$("manualSave");button.disabled=true;
+  $("manualFeedback").className="feedback";$("manualFeedback").textContent="Salvando oferta... Aguarde.";
+  try{
+    if(!$("manualConfirm").checked)throw Error("Confirme que conferiu preço e link oficial.");
+    const file=$("manualImageFile").files[0];
+    if(file){uploadedImage=await compressProductPhoto(file);}
+    const existing=$("manualId").value.trim();
+    const photo=uploadedImage||$("manualImageUrl").value.trim();
+    if(!photo)throw Error("Escolha uma foto ou informe URL de imagem mlstatic.com.");
+    const payload={
+      id:existing,title:$("manualTitle").value,category:$("manualCategory").value,
+      price:$("manualPrice").value,original_price:$("manualOriginal").value,
+      affiliate_url:$("manualLink").value.trim(),image:photo,
+      starts_at:toUTCfromLocal("manualStart"),expires_at:toUTCfromLocal("manualEnd"),
+      confirmed_by_admin:true
+    };
+    const result=await request("/api/admin/manual/save",{method:"POST",body:JSON.stringify(payload)});
+    $("manualFeedback").textContent="Oferta salva! Desconto informado: "+result.discount_percent+
+      "%\nInício: "+new Date(result.starts_at).toLocaleString("pt-BR")+
+      "\nValidade: "+new Date(result.expires_at).toLocaleString("pt-BR")+
+      "\nA vitrine mostrará o aviso 'Preço informado pelo afiliado; não verificado pela API'.";
+    $("manualImageFile").value="";$("manualId").value="";$("manualConfirm").checked=false;
+    await loadManual();await load();
+  }catch(e){$("manualFeedback").textContent="Não foi possível salvar: "+e.message;$("manualFeedback").className="feedback error";}
+  finally{button.disabled=false;}
+});
+async function loadManual(){
+  const data=await request("/api/admin/manual/offers");
+  const tbody=$("manualRows");tbody.replaceChildren();
+  const now=Date.now();
+  if(!data.offers.length){
+    const tr=document.createElement("tr");const td=document.createElement("td");td.colSpan=4;td.textContent="Nenhuma oferta manual cadastrada.";tr.append(td);tbody.append(tr);return;
+  }
+  for(const offer of data.offers){
+    const tr=document.createElement("tr");
+    function td(text){const node=document.createElement("td");node.textContent=text;return node;}
+    const start=Date.parse(offer.starts_at),end=Date.parse(offer.expires_at);
+    const status=!offer.is_active?"Pausada":now<start?"Programada":now>=end?"Expirada":"Na vitrine";
+    const actions=document.createElement("td");
+    const edit=document.createElement("button");edit.type="button";edit.textContent="Editar";
+    edit.addEventListener("click",()=>{
+      $("manualId").value=offer.id;$("manualTitle").value=offer.title;$("manualCategory").value=offer.category;
+      $("manualPrice").value=offer.price;$("manualOriginal").value=offer.original_price;
+      $("manualLink").value=offer.affiliate_url;
+      $("manualImageUrl").value=offer.image.startsWith("https://")?offer.image:"";
+      uploadedImage=offer.image.startsWith("data:")?offer.image:"";
+      $("manualImageFile").value="";
+      $("manualStart").value=toLocalInput(offer.starts_at);
+      $("manualEnd").value=toLocalInput(offer.expires_at);
+      $("manualConfirm").checked=false;
+      $("manualFeedback").textContent="Editando "+offer.title+". Confirme novamente os preços e o link antes de salvar.";
+      $("manual").scrollIntoView({behavior:"smooth",block:"start"});
+    });
+    const toggle=document.createElement("button");
+    toggle.type="button";toggle.className="secondary";toggle.textContent=offer.is_active?"Pausar":"Ativar";
+    toggle.addEventListener("click",async()=>{
+      toggle.disabled=true;
+      try{
+        await request("/api/admin/manual/activate",{method:"POST",body:JSON.stringify({id:offer.id,active:!offer.is_active})});
+        await loadManual();await load();
+      }catch(e){$("manualFeedback").textContent="Erro: "+e.message;$("manualFeedback").className="feedback error";toggle.disabled=false;}
+    });
+    actions.append(edit," ",toggle);
+    tr.append(td(offer.title),td(Number(offer.price).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})),td(status),actions);tbody.append(tr);
+  }
 }
 $("oauth").addEventListener("click",async()=>{
   $("oauthLink").style.display="none";
