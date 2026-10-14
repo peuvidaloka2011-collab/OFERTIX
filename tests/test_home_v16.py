@@ -53,7 +53,7 @@ class HomeDesignTest(unittest.TestCase):
             'id="partnerGrid"', 'id="cards"', 'id="siteToast"',
             'id="transparencia"', 'class="bag-illustration"',
             'id="how-title"', 'id="filterFeedback"', "Compartilhar oferta",
-            'rel="sponsored noopener noreferrer"',
+            'buy.rel="sponsored noopener noreferrer"',
         ):
             with self.subTest(feature=feature):
                 self.assertIn(feature, HTML)
