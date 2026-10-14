@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urljoin
 import html
 import oauth_ml
+import public_affiliate_catalog
 
 BASE = Path(__file__).resolve().parent
 DB = Path(os.getenv("OFERTIX_DB_PATH", str(BASE / "ofertix.db")))
@@ -1491,6 +1492,7 @@ class Handler(BaseHTTPRequestHandler):
                     row["pricing_source"] = "manual"
                     row["verified_discount"] = False
                 rows.extend(manual_rows)
+                rows.extend(public_affiliate_catalog.get_offers(PROMO_MIN))
                 rows.sort(key=lambda v: v.get("discount_percent") or 0, reverse=True)
             return self.respond(200, {"products": rows[:300], "minimum_discount": PROMO_MIN})
         if path == "/api/admin/status":
