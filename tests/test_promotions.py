@@ -332,6 +332,124 @@ class PromotionsTest(unittest.TestCase):
         self.assertFalse(main.allowed_affiliate_link("https://mercadolivre.com.evil.org/abc"))
         self.assertFalse(main.allowed_affiliate_link("http://mercadolivre.com/sec/abc"))
 
+    def test_catalog_url_finds_associated_listing_ids_without_inserting_offers(self):
+        calls=[]
+        def fake_api(path):
+            calls.append(path)
+            if path=="/products/MLB9876543210":
+                return {
+                    "id":"MLB9876543210","status":"active",
+                    "buy_box_winner":None,
+                    "children_ids":[],
+                    "pickers":[{"products":[
+                        {"product_id":"MLB900001"},
+                        {"product_id":"MLB900002"},
+                        {"product_id":"MLB900003"}
+                    ]}]
+                }
+            if path=="/products/MLB9876543210/items":
+                return {"results":[
+                    {"item_id":"MLB8888888888","status":"active"},
+                    {"item_id":"MLB9999999999","status":"active"},
+                    {"item_id":"MLB8888888888","status":"active"},
+                    {"item_id":"MLB2222222222","status":"paused"}
+                ]}
+            if path=="/products/MLB900001/items":
+                return {"results":[{"item_id":"MLB7777777777","status":"active"}]}
+            if path=="/products/MLB900002/items":
+                return {"results":[]}
+            raise AssertionError(path)
+        url="https://www.mercadolivre.com.br/camera-de-video/p/MLB9876543210"
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.find_catalog_listing_candidates(url)
+        self.assertEqual(result["catalog_id"],"MLB9876543210")
+        self.assertFalse(result["restricted"])
+        self.assertEqual([x["id"] for x in result["candidates"]],
+                         ["MLB8888888888","MLB9999999999","MLB7777777777"])
+        self.assertEqual(len(calls),4)
+        self.assertFalse(any("/items/MLB" in c for c in calls))
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_catalog_shortlink_redirect_is_validated(self):
+        url="https://meli.la/test"
+        destination="https://www.mercadolivre.com.br/camera/p/MLB1111111111?source=afiliado"
+        with patch.object(main,"affiliate_redirect_destination",return_value=destination) as redirect:
+            with patch.object(main.oauth_ml,"connected",return_value=False):
+                result=main.find_catalog_listing_candidates(url)
+        redirect.assert_called_once_with(url)
+        self.assertEqual(result["catalog_id"],"MLB1111111111")
+        self.assertTrue(result["restricted"])
+        self.assertEqual(result["candidates"],[])
+
+    def test_catalog_candidates_obey_403_without_trying_siblings(self):
+        from urllib.error import HTTPError
+        calls=[]
+        def fake_api(path):
+            calls.append(path)
+            if path=="/products/MLB9876543210":
+                return {"status":"active","pickers":[{"products":[{"product_id":"MLB900001"}]}]}
+            if path=="/products/MLB9876543210/items":
+                raise HTTPError(path,403,"Forbidden",{},None)
+            raise AssertionError("No permission bypass: "+path)
+        url="https://www.mercadolivre.com.br/p/MLB9876543210"
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.find_catalog_listing_candidates(url)
+        self.assertTrue(result["restricted"])
+        self.assertIn("HTTP 403",result["message"])
+        self.assertEqual(result["candidates"],[])
+        self.assertEqual(calls,[
+            "/products/MLB9876543210",
+            "/products/MLB9876543210/items"
+        ])
+
+    def test_catalog_candidates_do_not_trust_redirects_to_external_hosts(self):
+        with patch.object(main,"affiliate_redirect_destination",
+                          return_value="https://evil.example/p/MLB1234567890") as redirect:
+            with self.assertRaisesRegex(ValueError,"nao permitido"):
+                main.find_catalog_listing_candidates("https://meli.la/xyz")
+        redirect.assert_called_once()
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_catalog_candidates_do_not_use_fake_id_in_querystring(self):
+        url="https://www.mercadolivre.com.br/ofertas?catalog_id=MLB1111111111"
+        with patch.object(main,"affiliate_redirect_destination",return_value=None):
+            with self.assertRaisesRegex(ValueError,"Nao foi encontrada"):
+                main.find_catalog_listing_candidates(url)
+
+    def test_catalog_candidates_handles_catalog_api_refusal(self):
+        from urllib.error import HTTPError
+        url="https://www.mercadolivre.com.br/p/MLB9876543210"
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",
+                    side_effect=HTTPError(url,403,"Forbidden",{},None)):
+                result=main.find_catalog_listing_candidates(url)
+        self.assertTrue(result["restricted"])
+        self.assertEqual(result["candidates"],[])
+        self.assertIn("HTTP 403",result["message"])
+
+    def test_catalog_candidates_reports_selected_winner_without_promotion(self):
+        url="https://www.mercadolivre.com.br/p/MLB9876543210"
+        def fake_api(path):
+            if path=="/products/MLB9876543210":
+                return {"status":"active",
+                        "buy_box_winner":{"item_id":"MLB1234567890"},
+                        "children_ids":[]}
+            if path=="/products/MLB9876543210/items":
+                return {"results":[{"item_id":"MLB1234567890","status":"active"}]}
+            raise AssertionError(path)
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.find_catalog_listing_candidates(url)
+        self.assertEqual(len(result["candidates"]),1)
+        self.assertEqual(result["candidates"][0]["id"],"MLB1234567890")
+        self.assertEqual(result["candidates"][0]["status"],"preco nao verificado")
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
     def test_link_shortener_auto_detects_listing_and_checks_discount(self):
         url="https://meli.la/2a1TWtest"
         target="https://produto.mercadolivre.com.br/MLB-1234567890-exemplo-_JM"

@@ -194,6 +194,144 @@ def find_affiliate_listing_id(link):
     )
 
 
+def catalog_id_from_affiliate_url(link):
+    """Resolve apenas redirecionamentos HTTPS oficiais ate encontrar /p/MLB..."""
+    if not isinstance(link, str) or len(link) > 2048 or not allowed_affiliate_link(link):
+        raise ValueError("Cole um link HTTPS oficial do Mercado Livre.")
+    current = link
+    visited = set()
+    for _ in range(6):
+        if not allowed_affiliate_link(current):
+            raise ValueError("O link redireciona para um site nao permitido.")
+        if current in visited:
+            raise ValueError("O link de afiliado possui redirecionamentos repetidos.")
+        visited.add(current)
+        parsed = urlparse(current)
+        match = re.search(r"(?:^|/)p/(MLB\d{6,15})(?=[/_-]|$)", parsed.path, re.I)
+        if match:
+            return match.group(1).upper()
+        if listing_id_from_url(current):
+            raise ValueError("O link ja e de anuncio individual, nao de catalogo.")
+        if len(visited) > 5:
+            break
+        destination = affiliate_redirect_destination(current)
+        if not destination:
+            break
+        current = urljoin(current, destination)
+    raise ValueError("Nao foi encontrada uma pagina /p/MLB de catalogo nesse link.")
+
+
+def find_catalog_listing_candidates(link):
+    """Lista IDs associados via API autorizada, sem gerar links ou descontos falsos.
+
+    A busca de anuncios do produto pode retornar 403: nao contornar bloqueio.
+    Limitamos consultas e retornamos apenas IDs e rotulos sem dados sensiveis.
+    """
+    catalog_id = catalog_id_from_affiliate_url(link)
+    if not TOKEN and not oauth_ml.connected(DB):
+        return {
+            "catalog_id": catalog_id, "candidates": [],
+            "message": "Conecte o Mercado Livre no painel para consultar os anuncios.",
+            "restricted": True,
+        }
+
+    try:
+        product = ml_api("/products/" + catalog_id)
+    except urllib.error.HTTPError as exc:
+        return {
+            "catalog_id": catalog_id, "candidates": [], "restricted": True,
+            "message": "Consulta de catalogo nao autorizada (HTTP " + str(exc.code) + ").",
+        }
+    if not isinstance(product, dict):
+        raise ValueError("Mercado Livre retornou um formato de catalogo inesperado.")
+
+    # O produto e mais dois IDs conhecidos de variantes. Nada de busca ampla
+    # por outros vendedores, que pode estar bloqueada nesta integracao.
+    product_ids = [catalog_id]
+    extra_ids = []
+    for child in product.get("children_ids") or []:
+        extra_ids.append(str(child).upper())
+    for picker in product.get("pickers") or []:
+        if isinstance(picker, dict):
+            for option in picker.get("products") or []:
+                if isinstance(option, dict):
+                    extra_ids.append(str(option.get("product_id") or "").upper())
+    for pid in extra_ids:
+        if VALID_ID.fullmatch(pid) and pid not in product_ids:
+            product_ids.append(pid)
+        if len(product_ids) >= 3:
+            break
+
+    candidates = []
+    observed_ids = set()
+    failures = []
+    winner = product.get("buy_box_winner") or {}
+    if isinstance(winner, dict):
+        winner_id = str(winner.get("item_id", "")).upper()
+        if VALID_ID.fullmatch(winner_id):
+            observed_ids.add(winner_id)
+            candidates.append({
+                "id": winner_id, "catalog_product_id": catalog_id,
+                "source": "Anuncio vencedor indicado pelo catalogo",
+                "status": "preco nao verificado",
+            })
+
+    for idx, product_id in enumerate(product_ids):
+        if len(candidates) >= 5:
+            break
+        try:
+            result = ml_api("/products/" + product_id + "/items")
+        except urllib.error.HTTPError as exc:
+            failures.append("HTTP " + str(exc.code))
+            # Nao testar variantes para contornar uma negativa no produto original.
+            if idx == 0 and exc.code in (401, 403):
+                return {
+                    "catalog_id": catalog_id, "candidates": candidates,
+                    "restricted": True,
+                    "message": "Mercado Livre restringiu consulta aos anuncios do catalogo (HTTP "
+                    + str(exc.code) + "). A V10 nao contorna essa restricao.",
+                }
+            continue
+        except (urllib.error.URLError, TimeoutError, ValueError, TypeError):
+            failures.append("consulta indisponivel")
+            continue
+
+        rows = result.get("results") if isinstance(result, dict) else None
+        if not isinstance(rows, list):
+            failures.append("formato inesperado")
+            continue
+        for row in rows[:25]:
+            if len(candidates) >= 5:
+                break
+            if not isinstance(row, dict):
+                continue
+            item_id = str(row.get("item_id") or row.get("id") or "").upper()
+            if not VALID_ID.fullmatch(item_id) or item_id in observed_ids:
+                continue
+            if str(row.get("status", "active")).lower() not in ("active", ""):
+                continue
+            observed_ids.add(item_id)
+            candidates.append({
+                "id": item_id, "catalog_product_id": product_id,
+                "source": "Anuncio associado ao produto de catalogo",
+                "status": "preco nao verificado",
+            })
+    if candidates:
+        message = (
+            "Foram localizados IDs de anuncios associados. Selecione um anuncio "
+            "e confirme que seu link oficial de afiliado corresponde a ele. "
+            "Os precos e as comissoes ainda nao foram validados."
+        )
+    elif failures:
+        message = "Nenhum anuncio acessivel. Resposta da API: " + ", ".join(dict.fromkeys(failures)) + "."
+    else:
+        message = "A API nao informou anuncios individuais associados a esse catalogo."
+    return {
+        "catalog_id": catalog_id, "candidates": candidates,
+        "restricted": bool(failures) and not bool(candidates), "message": message,
+    }
+
+
 def positive_amount(number):
     if isinstance(number, bool):
         return None
@@ -933,6 +1071,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             if path == "/api/admin/oauth/start":
                 return self.respond(200, {"authorization_url": oauth_ml.start(DB)})
+            if path == "/api/admin/catalog/candidates":
+                result = find_catalog_listing_candidates(str(body.get("affiliate_url", "")).strip())
+                return self.respond(200, result)
             if path == "/api/admin/link":
                 result = register_affiliate_item(body.get("id", ""), body.get("affiliate_url", ""))
                 return self.respond(200, result)
