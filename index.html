@@ -403,124 +403,177 @@ main{padding-top:12px}
 </footer>
 <script>
 "use strict";
-const $ = id => document.getElementById(id);
-const brl = n => Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const catIcon = category => {
-  const name=String(category||"").toLocaleLowerCase("pt-BR");
-  if(/eletr|informat|comput|smart|celular|audio|áudio|fone|telefon/.test(name))return "📱";
-  if(/casa|cozinha|moveis|móveis|jardim|decora/.test(name))return "🏠";
-  if(/moda|roupa|vestu|sapato|calçado/.test(name))return "👕";
-  if(/beleza|cosmet|perfume|saúde|saude/.test(name))return "💄";
-  if(/auto|carro|moto|veículo/.test(name))return "🚗";
-  if(/esporte|fitness|bicicleta|bike/.test(name))return "🚲";
-  if(/game|jogo|brinquedo/.test(name))return "🎮";
-  if(/pet|animal/.test(name))return "🐾";
-  return "🛍️";
-};
-const element=(tag,cls,value)=>{
+const $=id=>document.getElementById(id);
+const brl=value=>Number(value).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const normalize=value=>String(value??"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+const element=(tag,cls,text)=>{
   const node=document.createElement(tag);
   if(cls)node.className=cls;
-  if(value!==undefined)node.textContent=value;
+  if(text!==undefined)node.textContent=text;
   return node;
 };
+const categoryGroups=[
+ {key:"celular",name:"Celulares",icon:"📱",terms:["celular","smartphone","iphone","telefone"]},
+ {key:"informatica",name:"Informática",icon:"💻",terms:["computador","notebook","laptop","informatica","teclado","mouse"]},
+ {key:"games",name:"Games",icon:"🎮",terms:["game","jogo","videogame","console","playstation","xbox"]},
+ {key:"tv",name:"TV e Vídeo",icon:"📺",terms:["tv","televisao","monitor","video","projetor"]},
+ {key:"eletro",name:"Eletrodomésticos",icon:"🧊",terms:["eletrodomestico","geladeira","fritadeira","air fryer","maquina de lavar"]},
+ {key:"casa",name:"Casa e Decoração",icon:"🛋️",terms:["casa","decoracao","sofa","cozinha","jardim","moveis"]},
+ {key:"beleza",name:"Beleza e Saúde",icon:"💄",terms:["beleza","saude","cosmetico","perfume","maquiagem"]},
+ {key:"esporte",name:"Esporte e Lazer",icon:"🏋️",terms:["esporte","fitness","lazer","academia","bicicleta"]},
+ {key:"infantil",name:"Bebês e Infantil",icon:"🍼",terms:["bebe","infantil","crianca"]},
+ {key:"pets",name:"Pet Shop",icon:"🐾",terms:["pet","animal","cachorro","gato"]},
+ {key:"ferramenta",name:"Ferramentas",icon:"🛠️",terms:["ferramenta","furadeira","parafusadeira"]},
+ {key:"auto",name:"Automotivo",icon:"🚗",terms:["automotivo","carro","veiculo","moto","peca"]},
+ {key:"moda",name:"Moda",icon:"👕",terms:["moda","roupa","vestido","sapato","calcado","camiseta"]}
+];
 let products=[];
+let selectedGroup="";
+function safeAffiliateURL(url){
+  try{
+    const link=new URL(String(url));
+    return link.protocol==="https:"&&!link.username&&!link.password?link.href:null;
+  }catch{return null;}
+}
+function canDisplay(p){
+  return p && typeof p.title==="string"&&p.title.trim()&&
+    Number.isFinite(Number(p.price))&&Number(p.price)>0&&
+    Number.isFinite(Number(p.original_price))&&Number(p.original_price)>Number(p.price)&&
+    Number.isFinite(Number(p.discount_percent))&&Number(p.discount_percent)>0&&
+    safeAffiliateURL(p.affiliate_url);
+}
+function belongsToGroup(p,key){
+  if(!key)return true;
+  const group=categoryGroups.find(g=>g.key===key);
+  if(!group)return true;
+  const text=normalize((p.title||"")+" "+(p.category||""));
+  return group.terms.some(term=>text.includes(normalize(term)));
+}
 function renderCategories(){
-  const grid=$("categoryGrid");
-  const selected=$("category").value;
-  const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-  grid.replaceChildren();
-  if(!categories.length){
-    grid.append(element("div","category-empty","As categorias aparecerão aqui assim que houver ofertas autorizadas."));
-    return;
-  }
-  const options=[{name:"Todas",key:"",icon:"🛒"},...categories.slice(0,11).map(c=>({name:c,key:c,icon:catIcon(c)}))];
-  for(const item of options){
-    const button=element("button","cat-chip"+(item.key===selected?" active":""),"");
+  const grid=$("categoryGrid");grid.replaceChildren();
+  const groups=[{key:"",name:"Ver todas",icon:"🛍️"},...categoryGroups];
+  for(const item of groups){
+    const button=element("button","cat-chip"+(selectedGroup===item.key?" active":""),undefined);
     button.type="button";
-    button.setAttribute("aria-pressed",item.key===selected?"true":"false");
+    button.setAttribute("aria-pressed",selectedGroup===item.key?"true":"false");
     button.append(element("span","emoji",item.icon),element("span","cat-title",item.name));
     button.addEventListener("click",()=>{
-      $("category").value=item.key;
-      renderCategories();render();
+      selectedGroup=item.key;
+      $("category").value="";
+      renderCategories();
+      render();
       $("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
     });
     grid.append(button);
   }
 }
+function renderPartners(){
+  const grid=$("partnerGrid");grid.replaceChildren();
+  const names=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  if(!names.length){
+    grid.append(element("div","partner-empty","Novas lojas aparecerão aqui quando houver ofertas disponíveis e links de afiliado autorizados."));
+    return;
+  }
+  for(const name of names.slice(0,18)){
+    const card=element("button","partner-card"+($("merchant").value===name?" active":""),undefined);
+    card.type="button";
+    const logo=element("span","partner-mark",name.slice(0,1).toUpperCase());
+    const info=element("span","partner-text");
+    info.append(element("span","partner-name",name),element("small","",products.filter(p=>(p.merchant||"Mercado Livre")===name).length+" oferta(s)"));
+    card.append(logo,info);
+    card.addEventListener("click",()=>{
+      $("merchant").value=name;selectedGroup="";
+      $("category").value="";
+      renderCategories();renderPartners();render();
+      $("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
+    });
+    grid.append(card);
+  }
+}
+function makeProductCard(p){
+  const card=element("article","card");
+  const media=element("div","media");
+  const discount=Math.floor(Number(p.discount_percent));
+  const verified=p.pricing_source==="verified_api";
+  const badge=element("span","discount-badge","-"+discount+"%"+(verified?"":"*"));
+  media.append(badge);
+  if(typeof p.image==="string"&&(/^https:\/\//i.test(p.image)||/^data:image\/(jpeg|png|webp);base64,/i.test(p.image))){
+    const img=element("img",null);
+    img.src=p.image;img.alt="Imagem do produto "+p.title;img.loading="lazy";
+    img.addEventListener("error",()=>media.replaceChildren(badge,element("span","fallback","🛍️")),{once:true});
+    media.append(img);
+  }else media.append(element("span","fallback","🛍️"));
+  const info=element("div","info");
+  info.append(element("div","shop",p.merchant||"Mercado Livre"));
+  info.append(element("h3","",p.title));
+  const pricing=element("div","pricing");
+  pricing.append(element("div","old",brl(p.original_price)),element("div","price",brl(p.price)));
+  let source="Desconto verificado pela API na última consulta.";
+  if(p.pricing_source==="affiliate_feed")source="Preço informado pelo catálogo da loja; confira antes de comprar.";
+  else if(p.pricing_source==="manual")source="Desconto informado manualmente; não verificado pela API.";
+  pricing.append(element("div","source",source));
+  const buy=element("a","btn","Ver oferta →");
+  buy.href=safeAffiliateURL(p.affiliate_url);
+  buy.target="_blank";buy.rel="sponsored noopener noreferrer";
+  pricing.append(buy);info.append(pricing);card.append(media,info);
+  return card;
+}
+function renderFeatured(){
+  const grid=$("featuredCards");
+  grid.replaceChildren();
+  const list=[...products].sort((a,b)=>Number(b.discount_percent)-Number(a.discount_percent)).slice(0,6);
+  if(!list.length){
+    grid.append(element("div","empty","Ainda não há ofertas disponíveis. As promoções aparecerão aqui após a integração de lojas parceiras autorizadas."));
+    return;
+  }
+  for(const p of list)grid.append(makeProductCard(p));
+}
 function render(){
-  const query=$("search").value.toLocaleLowerCase("pt-BR").trim();
+  const query=normalize($("search").value.trim());
   const category=$("category").value;
   const merchant=$("merchant").value;
   const sort=$("sort").value;
-  const showing=products.filter(p=>
-    (String(p.title)+" "+String(p.merchant||"Mercado Livre")+" "+String(p.category||""))
-      .toLocaleLowerCase("pt-BR").includes(query) &&
-    (!category||p.category===category) &&
-    (!merchant||(p.merchant||"Mercado Livre")===merchant)
-  );
-  showing.sort((a,b)=>{
+  const filtered=products.filter(p=>{
+    const matches=normalize((p.title||"")+" "+(p.merchant||"Mercado Livre")+" "+(p.category||"")).includes(query);
+    return matches&&(!category||p.category===category)&&(!merchant||(p.merchant||"Mercado Livre")===merchant)&&belongsToGroup(p,selectedGroup);
+  });
+  filtered.sort((a,b)=>{
     if(sort==="low")return Number(a.price)-Number(b.price);
     if(sort==="high")return Number(b.price)-Number(a.price);
     if(sort==="name")return String(a.title).localeCompare(String(b.title),"pt-BR");
     return Number(b.discount_percent)-Number(a.discount_percent);
   });
-  $("count").textContent=showing.length+" produto(s)";
-  $("cards").replaceChildren();
-  if(!showing.length){
-    $("cards").append(element("div","empty",
-      products.length?"Nenhuma oferta encontrada com esses filtros. Experimente outra busca.":
-      "Ainda não há ofertas de lojas parceiras disponíveis. Estamos aguardando catálogos autorizados."));
+  $("count").textContent=filtered.length+" produto(s)";
+  const grid=$("cards");grid.replaceChildren();
+  if(!filtered.length){
+    const message=products.length?
+      "Nenhuma oferta encontrada com esses filtros. Experimente outra categoria ou pesquisa.":
+      "Ainda não há ofertas disponíveis com links de afiliado autorizados. Novos produtos aparecerão quando os catálogos forem conectados.";
+    grid.append(element("div","empty",message));
     return;
   }
-  for(const p of showing){
-    const card=element("article","card");
-    const media=element("div","media");
-    const badge=element("span","discount-badge",
-      Math.floor(Number(p.discount_percent))+"% OFF"+(p.pricing_source==="verified_api"?"":"*"));
-    media.append(badge);
-    if(p.image && (/^https:\/\//i.test(p.image)||/^data:image\/(jpeg|png|webp);base64,/i.test(p.image))){
-      const img=element("img");
-      img.src=p.image;img.alt="Imagem de "+p.title;img.loading="lazy";
-      img.addEventListener("error",()=>{
-        media.replaceChildren(badge,element("span","fallback","🛍️"));
-      },{once:true});
-      media.append(img);
-    }else media.append(element("span","fallback","🛍️"));
-    const info=element("div","info");
-    info.append(element("div","shop",p.merchant||"Mercado Livre"));
-    info.append(element("h3","",p.title));
-    const pricing=element("div","pricing");
-    pricing.append(element("div","old",brl(p.original_price)));
-    pricing.append(element("div","price",brl(p.price)));
-    let source="Desconto verificado na consulta oficial à API.";
-    if(p.pricing_source==="affiliate_feed")source="Preço e desconto informados pela loja no catálogo de afiliados; confirme na loja.";
-    else if(p.pricing_source==="manual")source="Preço e desconto informados manualmente; não verificados automaticamente.";
-    pricing.append(element("div","source",source));
-    const link=element("a","btn","Ver oferta na loja →");
-    link.href=p.affiliate_url;
-    link.target="_blank";link.rel="sponsored noopener noreferrer";
-    pricing.append(link);
-    info.append(pricing);card.append(media,info);$("cards").append(card);
-  }
+  for(const p of filtered)grid.append(makeProductCard(p));
 }
 async function load(){
   try{
     const response=await fetch("/api/products",{cache:"no-store"});
     if(!response.ok)throw new Error("Não foi possível consultar ofertas.");
     const data=await response.json();
-    products=Array.isArray(data.products)?data.products:[];
-    const oldCat=$("category").value,oldMerchant=$("merchant").value;
-    const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort();
-    const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort();
+    products=(Array.isArray(data.products)?data.products:[]).filter(canDisplay);
+    const oldCategory=$("category").value,oldMerchant=$("merchant").value;
+    const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
     $("category").replaceChildren(new Option("Todas as categorias",""),...categories.map(c=>new Option(c,c)));
-    if(categories.includes(oldCat))$("category").value=oldCat;
+    if(categories.includes(oldCategory))$("category").value=oldCategory;
     $("merchant").replaceChildren(new Option("Todas as lojas",""),...merchants.map(m=>new Option(m,m)));
     if(merchants.includes(oldMerchant))$("merchant").value=oldMerchant;
-    renderCategories();render();
+    renderCategories();renderPartners();renderFeatured();render();
   }catch(err){
-    $("count").textContent="Temporariamente indisponível";
-    $("categoryGrid").replaceChildren(element("div","category-empty","Não foi possível carregar categorias."));
-    $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente atualizar a página mais tarde."));
+    $("count").textContent="Indisponível";
+    $("categoryGrid").replaceChildren(element("div","category-empty","Não foi possível carregar as categorias. Atualize a página."));
+    $("partnerGrid").replaceChildren(element("div","partner-empty","Não foi possível carregar as lojas parceiras."));
+    $("featuredCards").replaceChildren(element("div","empty","As ofertas estão temporariamente indisponíveis."));
+    $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente novamente mais tarde."));
   }
 }
 $("search").addEventListener("input",render);
@@ -530,8 +583,11 @@ $("searchSubmit").addEventListener("click",()=>{
 $("search").addEventListener("keydown",event=>{
   if(event.key==="Enter")$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
 });
-$("category").addEventListener("change",()=>{renderCategories();render();});
-$("merchant").addEventListener("change",render);
+$("category").addEventListener("change",()=>{
+  selectedGroup="";
+  renderCategories();render();
+});
+$("merchant").addEventListener("change",()=>{renderPartners();render();});
 $("sort").addEventListener("change",render);
 load();
 </script>
