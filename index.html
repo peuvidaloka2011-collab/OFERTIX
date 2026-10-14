@@ -285,6 +285,21 @@ main{padding-top:12px}
   .category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 
+
+/* Compensar as regras do layout anterior e preservar a legibilidade do banner */
+.hero-art > span.hero-percent{font-size:64px;filter:none}
+.hero-art > span.hero-percent-left{transform:rotate(-18deg)}
+.hero-art > span.hero-percent-right{transform:rotate(17deg)}
+.hero-bag strong span{font-size:inherit;filter:none;transform:none}
+@media(max-width:850px){
+  .hero-art{display:flex}
+  .cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .hero-art{display:none}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
 </style>
 </head>
 <body>
