@@ -18,7 +18,7 @@ CATALOG_URL = (
 )
 MAX_CATALOG_BYTES = 5 * 1024 * 1024
 CACHE_SECONDS = 300
-_CACHE = {"at": 0.0, "offers": [], "expires_at": None}
+_CACHE = {"at": 0.0, "offers": [], "partner_products": [], "expires_at": None}
 _LOCK = threading.Lock()
 _ALLOWED_AFFILIATE_HOSTS = frozenset({"www.awin1.com", "awin1.com"})
 
@@ -119,6 +119,7 @@ def get_offers(min_discount=10):
         if _CACHE["at"] and now_mono - _CACHE["at"] < CACHE_SECONDS:
             return [x for x in _CACHE["offers"] if x["discount_percent"] >= min_discount] if valid_cache else []
         offers = []
+        partner_products = []
         expires_at = None
         try:
             req = urllib.request.Request(
@@ -132,13 +133,72 @@ def get_offers(min_discount=10):
             payload = json.loads(raw.decode("utf-8"))
             expires_at = _parse_utc(payload.get("expires_at")) if isinstance(payload, dict) else None
             offers = read_catalog(payload, min_discount=1)
+            partner_products = read_partner_catalog(payload)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
                 OSError, ValueError, UnicodeError, json.JSONDecodeError):
             # Falha de rede: retorna cache anterior, se ainda nao estiver expirado;
             # a validade e avaliada a cada nova consulta periodica.
             offers = _CACHE["offers"] if valid_cache else []
+            partner_products = _CACHE["partner_products"] if valid_cache else []
             expires_at = _CACHE["expires_at"] if valid_cache else None
-        _CACHE.update(at=now_mono, offers=offers, expires_at=expires_at)
+        _CACHE.update(at=now_mono, offers=offers, partner_products=partner_products, expires_at=expires_at)
         if expires_at is None or datetime.now(timezone.utc) >= expires_at:
             return []
         return [x for x in offers if x["discount_percent"] >= min_discount]
+
+
+def read_partner_catalog(payload, *, now=None):
+    """Produtos com preço real, mas SEM desconto confirmado pelo feed."""
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return []
+    now = now or datetime.now(timezone.utc)
+    start = _parse_utc(payload.get("generated_at"))
+    end = _parse_utc(payload.get("expires_at"))
+    if start is None or end is None or not start <= now < end:
+        return []
+    rows = payload.get("partner_products", [])
+    if not isinstance(rows, list) or len(rows) > 2000:
+        return []
+    items = []
+    seen = set()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        oid = item.get("id")
+        title = item.get("title")
+        merchant = item.get("merchant")
+        if not isinstance(oid, str) or not oid or len(oid)>80 or oid in seen:
+            continue
+        if not isinstance(title,str) or not 5<=len(title)<=180:
+            continue
+        if not isinstance(merchant,str) or not 0<len(merchant)<=90:
+            continue
+        try:
+            price=float(item["price"])
+        except (ValueError,TypeError,KeyError,OverflowError):
+            continue
+        if not math.isfinite(price) or not 0<price<=1000000:
+            continue
+        if not _secure_url(item.get("affiliate_url"),_ALLOWED_AFFILIATE_HOSTS):
+            continue
+        if not _secure_url(item.get("image")):
+            continue
+        seen.add(oid)
+        items.append({
+            "id":"awin_"+oid,"title":title,"merchant":merchant,
+            "category":str(item.get("category") or "Produtos parceiros")[:70],
+            "image":item["image"],"price":round(price,2),
+            "affiliate_url":item["affiliate_url"],
+            "pricing_source":"affiliate_catalog","network":"Awin",
+            "verified_discount":False,
+        })
+    return items
+
+
+def get_partner_products():
+    """Atualiza cache junto com as promoções, sem chamadas extras ao GitHub."""
+    get_offers(min_discount=1)
+    with _LOCK:
+        if _CACHE["expires_at"] is None or datetime.now(timezone.utc)>=_CACHE["expires_at"]:
+            return []
+        return list(_CACHE["partner_products"])
