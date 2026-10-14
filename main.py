@@ -84,7 +84,8 @@ def allowed_affiliate_link(value):
             and not parsed.username
             and not parsed.password
             and host in {
-                "meli.la", "mercadolivre.com.br", "www.mercadolivre.com.br",
+                "meli.la", "www.meli.la", "mercadolivre.com", "www.mercadolivre.com",
+                "mercadolivre.com.br", "www.mercadolivre.com.br",
                 "mercadolibre.com", "www.mercadolibre.com",
             }
         )
