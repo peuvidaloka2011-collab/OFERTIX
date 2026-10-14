@@ -493,7 +493,7 @@ def diagnose_item_and_price(item_id):
         except (RuntimeError, ValueError, TypeError, KeyError):
             outcome[kind] = {"state": "invalid_response", "reason": "falha_na_consulta"}
 
-    eligible = bool(item is not None and sale is not None and verified_promotion(item, sale))
+    eligible = bool(item is not None and sale is not None and outcome.get("item", {}).get("stock_confirmed") and verified_promotion(item, sale))
     # Validador de anuncio segue exigindo estoque seguro, sem divulgar pelo diagnostico.
     return {
         "id": item_id, "connected": True,
