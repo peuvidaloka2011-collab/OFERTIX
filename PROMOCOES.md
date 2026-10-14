@@ -116,6 +116,17 @@ No painel /admin:
 Importante: um domínio como meli.la ou mercadolivre.com não comprova vínculo a uma conta de afiliado. Confirme que o link foi realmente gerado pela Central/Barra oficial e corresponde ao mesmo anúncio MLB. Links comuns de categorias, buscas ou página inicial não são elegíveis para comissão.
 
 O Render Free utiliza SQLite efêmero; reinicializações/deploy podem apagar links e tokens. Migrar para banco persistente ANTES da operação comercial. A revalidação periódica não é contínua em instâncias que hibernam.
+## V9: identificar automaticamente anuncio a partir do link
+
+No celular, basta colar o link oficial de afiliado (ex.: https://meli.la/...). O ID MLB fica em um campo opcional em **Opcoes avancadas**.
+
+A V9 extrai IDs somente de caminhos de anuncios individuais e segue ate 5 redirecionamentos dentro dos dominios oficiais permitidos. Nao visita domínios de terceiros apontados por redirecionamento, nao analisa HTML e nao considera URLs /p/MLB (produtos de catalogo) como anuncios de vendedor.
+
+Se o encurtador levar apenas ao catalogo, esconder o ID ou bloquear o acesso (403), o sistema apresenta erro claro e oferece preenchimento manual do ID de anuncio. O ID manual deve corresponder ao destino do link. Para URL de anuncio direto, IDs diferentes sao recusados.
+
+Detectar um ID não garante que o link gere comissao, nem garante que o item tenha oferta valida. A V9 ainda verifica o desconto mínimo por /items/ID e /sale_price; se falhar, fica pendente e fora da vitrine.
+
+**Limite operacional:** Shortlinks `meli.la` variam em comportamento; a capacidade de extrair o ID deve ser validada com um link oficial real. Com Render Free, o SQLite e as autorizacoes podem se perder em novos deploys, portanto esta etapa e para testes, nao para producao.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.

@@ -332,6 +332,110 @@ class PromotionsTest(unittest.TestCase):
         self.assertFalse(main.allowed_affiliate_link("https://mercadolivre.com.evil.org/abc"))
         self.assertFalse(main.allowed_affiliate_link("http://mercadolivre.com/sec/abc"))
 
+    def test_link_shortener_auto_detects_listing_and_checks_discount(self):
+        url="https://meli.la/2a1TWtest"
+        target="https://produto.mercadolivre.com.br/MLB-1234567890-exemplo-_JM"
+        def redirected(value):
+            self.assertEqual(value,url)
+            return target
+        with patch.object(main,"affiliate_redirect_destination",side_effect=redirected) as follow:
+            with patch.object(main.oauth_ml,"connected",return_value=True):
+                with patch.object(main,"ml_api",side_effect=lambda path:
+                        self.sale() if "/sale_price" in path else self.item()) as api:
+                    result=main.register_affiliate_item("",url)
+        self.assertEqual(result["id"],"MLB1234567890")
+        self.assertEqual(result["detection"],"automatico")
+        self.assertTrue(result["promotion_confirmed"])
+        self.assertTrue(result["publicly_visible"])
+        self.assertEqual(follow.call_count,1)
+        self.assertEqual(api.call_count,2)
+        with main.db() as conn:
+            row=conn.execute(
+                "SELECT affiliate_url,discount_percent,is_promo FROM products WHERE id=?",
+                ("MLB1234567890",)
+            ).fetchone()
+        self.assertEqual(row["affiliate_url"],url)
+        self.assertEqual(row["discount_percent"],20.0)
+        self.assertEqual(row["is_promo"],1)
+
+    def test_direct_listing_url_needs_no_redirect_request(self):
+        url="https://www.mercadolivre.com.br/MLB-9876543210-fone-de-ouvido-_JM?affiliate=123"
+        with patch.object(main,"affiliate_redirect_destination") as follow:
+            self.assertEqual(main.find_affiliate_listing_id(url),"MLB9876543210")
+        follow.assert_not_called()
+
+    def test_catalog_page_is_not_confused_with_listing(self):
+        url="https://meli.la/example"
+        catalog="https://www.mercadolivre.com.br/p/MLB9876543210?pdp_filters=sku"
+        with patch.object(main,"affiliate_redirect_destination",return_value=catalog):
+            with self.assertRaisesRegex(ValueError,"catalogo"):
+                main.register_affiliate_item("",url)
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_auto_id_from_querystring_is_not_used(self):
+        url="https://www.mercadolivre.com.br/p/MLB9876543210?item_id=MLB1234567890"
+        self.assertIsNone(main.listing_id_from_url(url))
+        with patch.object(main,"affiliate_redirect_destination") as follow:
+            with self.assertRaisesRegex(ValueError,"catalogo"):
+                main.find_affiliate_listing_id(url)
+        follow.assert_not_called()
+
+    def test_external_redirect_is_not_followed_or_saved(self):
+        url="https://meli.la/redirect"
+        with patch.object(main,"affiliate_redirect_destination",return_value="http://127.0.0.1:8080/private") as follow:
+            with self.assertRaisesRegex(ValueError,"outro dominio"):
+                main.register_affiliate_item("",url)
+        self.assertEqual(follow.call_count,1)
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_official_to_untrusted_redirect_is_blocked(self):
+        url="https://meli.la/redirect"
+        with patch.object(main,"affiliate_redirect_destination",return_value="https://www.mercadolivre.com.br.evil.org/item"):
+            with self.assertRaisesRegex(ValueError,"outro dominio"):
+                main.find_affiliate_listing_id(url)
+
+    def test_redirect_loop_is_limited(self):
+        url="https://meli.la/loop"
+        with patch.object(main,"affiliate_redirect_destination",return_value=url) as follow:
+            with self.assertRaisesRegex(ValueError,"repetido"):
+                main.find_affiliate_listing_id(url)
+        self.assertEqual(follow.call_count,1)
+
+    def test_shortlink_without_individual_listing_explains_manual_option(self):
+        url="https://meli.la/single"
+        with patch.object(main,"affiliate_redirect_destination",return_value=None):
+            with self.assertRaisesRegex(ValueError,"Opcoes avancadas"):
+                main.register_affiliate_item("",url)
+
+    def test_explicit_manual_id_still_works_on_catalog_link(self):
+        url="https://www.mercadolivre.com.br/p/MLB9876543210"
+        with patch.object(main,"affiliate_redirect_destination") as follow:
+            with patch.object(main.oauth_ml,"connected",return_value=False):
+                result=main.register_affiliate_item("MLB1234567890",url)
+        self.assertEqual(result["id"],"MLB1234567890")
+        self.assertEqual(result["detection"],"manual")
+        self.assertFalse(result["publicly_visible"])
+        follow.assert_not_called()
+
+    def test_conflicting_manual_id_is_rejected_for_direct_listing(self):
+        url="https://produto.mercadolivre.com.br/MLB-1234567890-x-_JM"
+        with self.assertRaisesRegex(ValueError,"nao corresponde"):
+            main.register_affiliate_item("MLB2222222222",url)
+
+    def test_link_validation_prevents_untrusted_hosts_and_ports(self):
+        urls=[
+            "http://meli.la/test", "https://meli.la.evil.org/test",
+            "https://meli.la:8443/test", "https://meli.la@evil.com/MLB-1234567890",
+            "https://127.0.0.1/MLB-1234567890",
+        ]
+        for url in urls:
+            with self.subTest(url=url):
+                self.assertFalse(main.allowed_affiliate_link(url))
+                with self.assertRaises(ValueError):
+                    main.find_affiliate_listing_id(url)
+
     def test_manual_link_registers_verified_discount_without_category_import(self):
         calls = []
         def fake_api(path):
