@@ -92,6 +92,15 @@ Limites: o Mercado Livre pode nao fornecer um anuncio compravel ou negar acesso 
 
 Render Free pode apagar o banco SQLite e a autorizacao OAuth em novos deploys. Para uso publico: adicionar banco persistente e agendamento confiavel.
 
+## V7: busca alternativa de anuncios por categoria
+
+Quando um ranking /highlights mostra produtos do tipo PRODUCT sem item vencedor e nao encontra nenhum anuncio MLB, a importacao tenta o recurso oficial /sites/MLB/search?category=ID&limit=20. Os resultados dessa busca sao **anuncios de categoria e NAO necessariamente os mais vendidos**.
+
+Cada anuncio encontrado e consultado por /items/ID e /items/ID/sale_price?context=channel_marketplace. Somente descontos confirmados iguais ou superiores ao percentual minimo sao salvos como promocao. Para aparecer na vitrine, o administrador ainda precisa associar link valido e oficial de afiliado gerado pelo programa Mercado Livre.
+
+A API pode recusar o endpoint de busca por categoria em algumas contas/permissoes (HTTP 403/401). O painel exibe a falha e nao inventa ofertas. Se os metodos falharem, conferir documentacao e alternativas autorizadas. Nao usar scraping de Mercado Livre para contornar bloqueios.
+
+Nota: V7 usa SQLite temporario do Render Free. Cada novo deploy pode apagar o token OAuth e links associados. Migrar para banco persistente antes de operacao real.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
