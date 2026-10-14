@@ -118,6 +118,10 @@ async function importCategory(){
       importInfo("Verificação concluída!\nEntradas no ranking: "+(data.ranking_entries??0)+
         "\nTipos encontrados: ITEM "+(kinds.ITEM??0)+", PRODUCT "+(kinds.PRODUCT??0)+", USER_PRODUCT "+(kinds.USER_PRODUCT??0)+
         "\nITEM com identificador MLBU: "+(data.item_mlbu_entries??0)+
+        "\nBusca alternativa de anúncios na categoria: "+(data.category_search_attempted?"Sim":"Não")+
+        "\nAnúncios encontrados pela busca alternativa: "+(data.category_search_returned??0)+
+        "\nAnúncios verificados pela busca alternativa: "+(data.category_search_checked??0)+
+        (data.category_search_error?"\nBusca alternativa indisponível: "+data.category_search_error:"")+
         "\nAnúncios encontrados e analisados: "+data.checked+
         "\nProdutos de catálogo convertidos em anúncios: "+(data.resolved_catalog??0)+
         "\nPromoções com desconto confirmado: "+data.promotions+
