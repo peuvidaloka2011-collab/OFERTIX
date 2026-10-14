@@ -187,18 +187,18 @@ $("diagnose").addEventListener("click",async()=>{
     const list=(data.sample||[]).map((p,i)=>
       "Produto "+(i+1)+" ("+p.product_id+"):"+
       (p.error?" "+p.error:
-      "\\nStatus: "+p.status+
-      "\\nPossui anúncio vencedor: "+(p.buy_box_winner_has_item_id?"Sim":"Não")+
-      "\\nTem produto-pai: "+(p.has_parent_id?"Sim":"Não")+
-      "\\nFilhos: "+p.children_count+
-      "\\nVariantes: "+p.picker_options_count+
-      "\\nTipo: "+p.type)
-    ).join("\\n\\n");
+      "\nStatus: "+p.status+
+      "\nPossui anúncio vencedor: "+(p.buy_box_winner_has_item_id?"Sim":"Não")+
+      "\nTem produto-pai: "+(p.has_parent_id?"Sim":"Não")+
+      "\nFilhos: "+p.children_count+
+      "\nVariantes: "+p.picker_options_count+
+      "\nTipo: "+p.type)
+    ).join("\n\n");
     importInfo("Diagnóstico da categoria "+category+
-      "\\nTotal no ranking: "+data.ranking_count+
-      "\\nAmostra: "+data.sample_size+
-      "\\n\\n"+list+
-      "\\n\\nSe todos estiverem sem anúncios vencedores, vamos confirmar qual recurso oficial permite localizar anúncios acessíveis. Nenhuma credencial é exibida.");
+      "\nTotal no ranking: "+data.ranking_count+
+      "\nAmostra: "+data.sample_size+
+      "\n\n"+list+
+      "\n\nSe todos estiverem sem anúncios vencedores, vamos confirmar qual recurso oficial permite localizar anúncios acessíveis. Nenhuma credencial é exibida.");
   }catch(e){importInfo("Erro no diagnóstico: "+e.message,true);}
   finally{button.disabled=false;}
 });
