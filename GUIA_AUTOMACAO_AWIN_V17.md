@@ -1,5 +1,20 @@
 # OFERTIX V17 — Catálogo de promoções automático
 
+## Suporte a catálogos Awin formato Google — Carraro BR
+
+A V17 também reconhece automaticamente feeds CSV/GZIP `Google (Novo)` da Awin, sem converter o arquivo manualmente. Exemplo real analisado: `81383-retail-pt_BR.csv.gz` da **Carraro BR** (catálogo não incluído no código).
+
+- **1.628** produtos no arquivo; **1.542** em estoque e **86** fora de estoque.
+- Todos têm nome, foto HTTPS, preço em **BRL** e URL de afiliado Awin.
+- A coluna `sale_price` está vazia em todos os registros. **Não foi identificado nenhum desconto que possa ser anunciado como promoção.**
+- O OFERTIX separa esses produtos na nova seção **Produtos de lojas parceiras**, com o preço informado pela loja e sem selo de desconto; a área **Ofertas do dia** continua exibindo apenas promoções com referência de preço suficiente.
+- O catálogo automático é alimentado pela URL de feed da Awin, cadastrada como segredo em GitHub Actions. **O CSV enviado para diagnóstico não deve ser incluído no repositório.**
+- Uma única atualização gera até 300 ofertas com desconto e até 2.000 produtos regulares; no navegador, a vitrine exibe até 60 resultados regulares por pesquisa para melhorar o desempenho.
+- O filtro por nome, categoria e loja considera produtos regulares e promocionais. A compra é feita na loja anunciante; comissão depende dos termos comerciais da Awin.
+- Se futuramente o feed trouxer `sale_price` menor que `price` em BRL e desconto de pelo menos 10%, esses itens poderão entrar automaticamente na seção de promoções, sem desenvolvimento adicional.
+
+**Segurança:** uma URL de feed com chave apareceu anteriormente em captura de tela. Recomenda-se renovar essa chave antes de configurá-la no GitHub. Nunca registrar essa URL em código, commits ou arquivos públicos.
+
 ## O que esta versão automatiza
 
 Sem cadastrar cada produto: GitHub Actions executa um sincronizador a cada 6 horas, lê os **feeds de produtos autorizados da Awin**, verifica links de afiliado, preços, fotos, moeda BRL e descontos superiores ao mínimo configurado (10% no OFERTIX), e publica até 300 ofertas relevantes. O site lê o arquivo gerado pelo GitHub e atualiza a vitrine automaticamente. O comprador finaliza a compra no anunciante.
