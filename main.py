@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 import html
 import oauth_ml
 
@@ -88,22 +88,110 @@ def ml_api(path):
         return json.load(response)
 
 
+# Redirecionamentos aceitos SOMENTE dentro de dominios oficiais conhecidos.
+# Nunca acessar servidores arbitrarios informados via Location (protecao SSRF).
+AFFILIATE_HOSTS = frozenset({
+    "meli.la", "www.meli.la", "mercadolivre.com", "www.mercadolivre.com",
+    "mercadolivre.com.br", "www.mercadolivre.com.br",
+    "produto.mercadolivre.com.br", "mercadolibre.com",
+    "www.mercadolibre.com", "mercadolibre.com.br", "www.mercadolibre.com.br",
+})
+
+
 def allowed_affiliate_link(value):
     try:
         parsed = urlparse(value)
-        host = (parsed.hostname or "").lower()
         return (
             parsed.scheme == "https"
+            and bool(parsed.netloc)
+            and (parsed.hostname or "").lower() in AFFILIATE_HOSTS
+            and parsed.port in (None, 443)
             and not parsed.username
             and not parsed.password
-            and host in {
-                "meli.la", "www.meli.la", "mercadolivre.com", "www.mercadolivre.com",
-                "mercadolivre.com.br", "www.mercadolivre.com.br",
-                "mercadolibre.com", "www.mercadolibre.com",
-            }
         )
     except (TypeError, ValueError):
         return False
+
+
+def listing_id_from_url(url):
+    """Extrai apenas IDs MLB de caminho de anuncio; /p/MLB e produto de catalogo."""
+    if not allowed_affiliate_link(url):
+        return None
+    parsed = urlparse(url)
+    if (parsed.hostname or "").lower() in {"meli.la", "www.meli.la"}:
+        return None
+    path = parsed.path
+    if re.search(r"(?:^|/)p/MLB\d+(?:[/_-]|$)", path, re.I):
+        return None
+    # Nao usar querystring: parametros de rastreio podem trazer outros IDs.
+    match = re.search(r"(?:^|[/_])(MLB)-?(\d{6,15})(?=$|[-/_])", path, re.I)
+    return "MLB" + match.group(2) if match else None
+
+
+class _NoAffiliateRedirects(urllib.request.HTTPRedirectHandler):
+    """A aplicacao verifica o proximo destino ANTES de segui-lo."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def affiliate_redirect_destination(url):
+    """Consulta apenas o header Location. Nao baixa nem processa HTML de terceiros."""
+    opener = urllib.request.build_opener(_NoAffiliateRedirects())
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "OFERTIX/9.0", "Accept": "text/html"}, method="GET"
+    )
+    try:
+        with opener.open(req, timeout=5) as response:
+            return response.headers.get("Location")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308):
+            return exc.headers.get("Location") if exc.headers else None
+        raise ValueError(
+            "O link nao pode ser aberto automaticamente (HTTP "
+            + str(exc.code) + "). Informe o ID do anuncio manualmente."
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise ValueError(
+            "Nao foi possivel abrir o link de afiliado. Informe o ID do anuncio manualmente."
+        ) from None
+
+
+def find_affiliate_listing_id(link):
+    """Segue no maximo 5 redirecionamentos oficiais, sem consultar busca bloqueada.
+
+    Links de catalogo ou sem ID verificavel exigem preenchimento manual.
+    Nao presume que codigo MLB de produto de catalogo e anuncio do vendedor.
+    """
+    if len(link) > 2048 or not allowed_affiliate_link(link):
+        raise ValueError("Cole um link HTTPS oficial do Mercado Livre ou meli.la.")
+    visited = set()
+    current = link
+    for _ in range(6):
+        if not allowed_affiliate_link(current):
+            raise ValueError(
+                "O link direciona para outro dominio. Informe manualmente o ID do anuncio."
+            )
+        if current in visited:
+            raise ValueError("O link entrou em redirecionamento repetido. Informe o ID manualmente.")
+        visited.add(current)
+        item_id = listing_id_from_url(current)
+        if item_id:
+            return item_id
+        if re.search(r"(?:^|/)p/MLB\d+(?:[/_-]|$)", urlparse(current).path, re.I):
+            raise ValueError(
+                "O link abriu uma pagina de catalogo, sem ID de anuncio individual. "
+                "Informe o ID do anuncio manualmente em Opcoes avancadas."
+            )
+        if len(visited) > 5:
+            break
+        location = affiliate_redirect_destination(current)
+        if not location:
+            break
+        current = urljoin(current, location)
+    raise ValueError(
+        "Nao foi possivel identificar o ID do anuncio nesse link. "
+        "Abra Opcoes avancadas para informar o ID MLB manualmente."
+    )
 
 
 def positive_amount(number):
@@ -186,10 +274,17 @@ def register_affiliate_item(item_id, link):
     """
     item_id = str(item_id).strip().upper()
     link = str(link).strip()
-    if not VALID_ID.fullmatch(item_id):
-        raise ValueError("Informe o ID de anuncio MLB (exemplo: MLB1234567890), nao o produto de catalogo.")
     if len(link) > 2048 or not allowed_affiliate_link(link):
         raise ValueError("Cole um link HTTPS gerado no programa de afiliados do Mercado Livre.")
+    detection = "manual" if item_id else "automatico"
+    if not item_id:
+        item_id = find_affiliate_listing_id(link)
+    if not VALID_ID.fullmatch(item_id):
+        raise ValueError("Informe um ID de anuncio MLB valido, nao um codigo de catalogo.")
+    # Se o destino ja expõe um anuncio, nunca vincular a outro ID digitado por engano.
+    direct_item = listing_id_from_url(link)
+    if direct_item and direct_item != item_id:
+        raise ValueError("O ID digitado nao corresponde ao anuncio indicado no link.")
     verified = False
     promo = False
     reason = None
@@ -228,6 +323,7 @@ def register_affiliate_item(item_id, link):
     return {
         "ok": True,
         "id": item_id,
+        "detection": detection,
         "checked": verified,
         "promotion_confirmed": bool(verified and promo),
         "publicly_visible": bool(verified and promo),
