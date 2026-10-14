@@ -152,6 +152,30 @@ Mesmo que /sale_price responda 200 e indique desconto >=10%, **nao publica** qua
 O Mercado Livre pode retornar HTTP 403 por diversas causas (escopos, usuario, IP, aplicativo, falta de validacoes). Testar a conta real e revisar o detalhe de erro normalizado antes de concluir a causa; nao contornar bloqueios com rotas alternativas.
 
 Antes de uso publico: Render Free usa SQLite efemero e pode perder tokens e links apos deploy/reinicio. Migrar para banco persistente.
+## V12: ofertas manuais com links de afiliado Mercado Livre
+
+Foco: contas somente de afiliado não conseguem consultar preços de anúncios de terceiros pela API (HTTP 403). Esta versão cria um **fluxo independente da API** para divulgar produtos com preço informado pelo administrador, mantendo o modo verificado por API existente.
+
+### Cadastro no painel `/admin`
+
+1. Gere seu link para **um produto específico** na Central/Barra de Afiliados. Não use links de perfil social, página inicial, buscas ou painel de afiliados.
+2. Informe nome, categoria, preço atual e preço anterior **observados no momento no Mercado Livre**. Não invente preço anterior. É obrigatório desconto informado >= `OFERTIX_MIN_DISCOUNT` (10% por padrão).
+3. Adicione imagem própria/autorizada JPG/PNG/WebP do computador ou URL HTTPS do domínio `mlstatic.com` (e subdomínios). Fotos locais são comprimidas e incorporadas ao banco em texto base64; máximo 55 KB por imagem.
+4. Informe início opcional (agora se vazio) e validade obrigatória: até 72 horas após o início, programável no máximo 30 dias à frente. Confirme que conferiu preço e link para habilitar o salvamento.
+5. Gerencie ofertas por **Editar** e **Pausar/Ativar**. A vitrine consulta diretamente `starts_at`/`expires_at`, então as ofertas somem do catálogo após a validade sem depender de processos de sincronização em segundo plano.
+
+### Transparência e segurança
+
+- Cada oferta manual é identificada na vitrine: **Preço e desconto informados pelo afiliado; não verificados pela API**. O símbolo * no desconto indica preço informado manualmente.
+- Ofertas automáticas verificadas pela API mantêm sua identificação própria e regras de verificação e expiração originais.
+- O servidor valida preços positivos, preço anterior maior, desconto mínimo, links HTTPS de domínios oficiais, prazo, autenticação administrativa e presença de imagem.
+- A verificação apenas de domínio **não garante comissão**. Confirme que o link foi efetivamente gerado para aquele produto por ferramenta oficial e que o seu canal de divulgação está permitido nos termos do programa.
+- Não usar imagens nem declarações de desconto sem autorização ou comprovação. O consumidor deve confirmar preços e disponibilidade na página oficial antes de comprar.
+- Os dados manuais estão na tabela isolada `manual_offers`. Eles não são sobrescritos pelo sincronizador de ofertas automático, que consulta `/items` e `/sale_price`.
+
+### Antes da operação pública
+
+**Render Free usa disco efêmero:** reinício/deploy pode apagar ofertas e imagens manuais, e os tokens OAuth. Migrar para armazenamento persistente antes de depender de vendas, relatórios ou acessos constantes. O servidor pode hibernar; a validade é aplicada na leitura, mas solicitações podem demorar a iniciar. Link de afiliado não é garantia de comissão nem de preço.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.

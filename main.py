@@ -1,5 +1,9 @@
 """OFERTIX: vitrine de promocoes verificadas pela API oficial do Mercado Livre."""
 import hmac
+import base64
+import binascii
+import math
+import uuid
 import json
 import os
 import re
@@ -9,7 +13,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -67,6 +71,21 @@ def init_db():
         }.items():
             if name not in columns:
                 conn.execute("ALTER TABLE products ADD COLUMN " + name + " " + definition)
+        conn.execute("""CREATE TABLE IF NOT EXISTS manual_offers (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            category TEXT NOT NULL,
+            price REAL NOT NULL,
+            original_price REAL NOT NULL,
+            discount_percent REAL NOT NULL,
+            image TEXT NOT NULL,
+            affiliate_url TEXT NOT NULL,
+            starts_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""")
     oauth_ml.init(DB)
 
 
@@ -330,6 +349,165 @@ def find_catalog_listing_candidates(link):
         "catalog_id": catalog_id, "candidates": candidates,
         "restricted": bool(failures) and not bool(candidates), "message": message,
     }
+
+
+def utc_time(value):
+    if not isinstance(value, str) or len(value) > 45:
+        raise ValueError("Informe data e hora em formato valido com fuso horario.")
+    try:
+        time_value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("Data e hora invalidas.") from None
+    if time_value.tzinfo is None:
+        raise ValueError("O horario precisa de fuso; use o seletor de data do painel.")
+    return time_value.astimezone(timezone.utc).replace(microsecond=0)
+
+
+def clean_manual_image(value):
+    """Aceita imagem propria comprimida ou URL HTTPS do CDN oficial de produto."""
+    if not isinstance(value, str):
+        raise ValueError("Envie uma imagem JPG, PNG ou WebP.")
+    if value.startswith("data:image/"):
+        pattern = re.fullmatch(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)", value)
+        if not pattern or len(value) > 80000:
+            raise ValueError("Imagem muito grande ou formato incorreto. Escolha uma imagem menor.")
+        try:
+            binary = base64.b64decode(pattern.group(2), validate=True)
+        except (binascii.Error, ValueError):
+            raise ValueError("Imagem invalida.") from None
+        format_name = pattern.group(1)
+        valid_magic = (
+            (format_name == "jpeg" and binary.startswith(b"\xff\xd8\xff")) or
+            (format_name == "png" and binary.startswith(b"\x89PNG\r\n\x1a\n")) or
+            (format_name == "webp" and binary.startswith(b"RIFF") and binary[8:12] == b"WEBP")
+        )
+        if not valid_magic or len(binary) > 55000 or len(binary) < 20:
+            raise ValueError("Imagem invalida ou maior que 55 KB apos compressao.")
+        return value
+    try:
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        if (parsed.scheme != "https" or parsed.username or parsed.password or
+            parsed.port not in (None, 443) or
+            (host != "mlstatic.com" and not host.endswith(".mlstatic.com")) or
+            not parsed.path or len(value) > 1000):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError("Informe imagem propria ou URL HTTPS de imagem mlstatic.com.") from None
+    return value
+
+
+def validate_offer_link(value):
+    if not isinstance(value, str) or len(value) > 2048 or not allowed_affiliate_link(value):
+        raise ValueError("Informe um link HTTPS oficial do Mercado Livre.")
+    parsed = urlparse(value)
+    path = parsed.path.lower().strip("/")
+    if (not path or path.startswith(("afiliados", "social", "busca", "categorias")) or
+        path in ("home", "ofertas", "")):
+        raise ValueError("Cole o link de um produto, nao seu perfil de afiliado nem a pagina inicial.")
+    if parsed.hostname in ("meli.la", "www.meli.la") and len(path) < 4:
+        raise ValueError("Informe o link meli.la completo do produto.")
+    return value
+
+
+def manual_price(value, field):
+    if isinstance(value, bool):
+        raise ValueError(field + " deve ser numerico.")
+    try:
+        n = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(field + " deve ser um valor numerico positivo.") from None
+    if not math.isfinite(n) or n < 0.01 or n > 1000000:
+        raise ValueError(field + " deve estar entre R$ 0,01 e R$ 1.000.000.")
+    return round(n, 2)
+
+
+def save_manual_offer(body):
+    """Cadastrar oferta declarada pelo administrador, SEM fingir validação pela API."""
+    if body.get("confirmed_by_admin") is not True:
+        raise ValueError("Confirme que voce conferiu os precos e gerou link autorizado para o produto.")
+    title = str(body.get("title", "")).strip()
+    category = str(body.get("category", "Ofertas")).strip() or "Ofertas"
+    if not (5 <= len(title) <= 140) or len(category) > 50:
+        raise ValueError("Informe nome do produto (5 a 140 caracteres) e categoria valida.")
+    link = validate_offer_link(str(body.get("affiliate_url", "")).strip())
+    image = clean_manual_image(body.get("image", ""))
+    price = manual_price(body.get("price"), "Preco atual")
+    original = manual_price(body.get("original_price"), "Preco anterior")
+    if original <= price:
+        raise ValueError("Preco anterior precisa ser maior que preco atual.")
+    discount = round((original - price) * 100 / original, 2)
+    if discount < PROMO_MIN:
+        raise ValueError("Desconto informado menor que o minimo de " + str(PROMO_MIN) + "%.")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    starts = utc_time(body["starts_at"]) if body.get("starts_at") else now
+    expires = utc_time(body.get("expires_at"))
+    if starts < now - timedelta(minutes=5) or starts > now + timedelta(days=30):
+        raise ValueError("Inicio precisa ser entre agora e os proximos 30 dias.")
+    if expires <= now or expires <= starts:
+        raise ValueError("Validade precisa ser futura e posterior ao inicio.")
+    if expires - starts > timedelta(hours=72):
+        raise ValueError("Para precos manuais, a validade maxima e de 72 horas. Confira novamente antes de renovar.")
+    starts_iso = starts.strftime("%Y-%m-%dT%H:%M:%SZ")
+    expires_iso = expires.strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    identifier = str(body.get("id", "")).strip()
+    if identifier and not re.fullmatch(r"[0-9a-f]{32}", identifier):
+        raise ValueError("ID interno de oferta invalido.")
+    if not identifier:
+        identifier = uuid.uuid4().hex
+    with db() as conn:
+        if body.get("id"):
+            cur = conn.execute(
+                """UPDATE manual_offers SET title=?,category=?,price=?,original_price=?,
+                   discount_percent=?,image=?,affiliate_url=?,starts_at=?,expires_at=?,
+                   is_active=1,updated_at=? WHERE id=?""",
+                (title, category, price, original, discount, image, link,
+                 starts_iso, expires_iso, now_iso, identifier))
+            if not cur.rowcount:
+                raise ValueError("Oferta nao encontrada. Atualize o painel.")
+        else:
+            conn.execute(
+                """INSERT INTO manual_offers
+                   (id,title,category,price,original_price,discount_percent,image,
+                    affiliate_url,starts_at,expires_at,is_active,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)""",
+                (identifier, title, category, price, original, discount,
+                 image, link, starts_iso, expires_iso, now_iso, now_iso))
+    return {
+        "ok": True, "id": identifier, "discount_percent": discount,
+        "pricing_source": "manual", "starts_at": starts_iso,
+        "expires_at": expires_iso,
+        "message": "Oferta cadastrada com desconto informado manualmente. A vitrine respeita o periodo escolhido; confira o preco no Mercado Livre.",
+    }
+
+
+def change_manual_offer(body):
+    identifier = str(body.get("id", "")).strip()
+    active = body.get("active")
+    if not re.fullmatch(r"[0-9a-f]{32}", identifier) or not isinstance(active, bool):
+        raise ValueError("ID interno ou acao invalida.")
+    with db() as conn:
+        updated = conn.execute(
+            "UPDATE manual_offers SET is_active=?,updated_at=? WHERE id=?",
+            (1 if active else 0, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), identifier)
+        )
+        if not updated.rowcount:
+            raise ValueError("Oferta nao encontrada.")
+    return {"ok": True, "id": identifier, "active": active}
+
+
+def visible_manual_offers(conn):
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return [
+        dict(r) for r in conn.execute(
+            """SELECT id,title,price,original_price,discount_percent,image,category,
+                      affiliate_url,starts_at,expires_at
+               FROM manual_offers
+               WHERE is_active=1 AND starts_at<=? AND expires_at>?
+               ORDER BY discount_percent DESC LIMIT 300""", (now, now)
+        )
+    ]
 
 
 def positive_amount(number):
@@ -1106,7 +1284,16 @@ class Handler(BaseHTTPRequestHandler):
                         (PROMO_MIN, "-" + str(FRESH_HOURS) + " hours"),
                     )
                 ]
-            return self.respond(200, {"products": rows, "minimum_discount": PROMO_MIN})
+                for row in rows:
+                    row["pricing_source"] = "verified_api"
+                    row["verified_discount"] = True
+                manual_rows = visible_manual_offers(conn)
+                for row in manual_rows:
+                    row["pricing_source"] = "manual"
+                    row["verified_discount"] = False
+                rows.extend(manual_rows)
+                rows.sort(key=lambda v: v.get("discount_percent") or 0, reverse=True)
+            return self.respond(200, {"products": rows[:300], "minimum_discount": PROMO_MIN})
         if path == "/api/admin/status":
             if not self.is_admin():
                 return
@@ -1118,12 +1305,14 @@ class Handler(BaseHTTPRequestHandler):
                        AND affiliate_url IS NOT NULL AND affiliate_url<>''""",
                     (PROMO_MIN, "-" + str(FRESH_HOURS) + " hours"),
                 ).fetchone()[0]
+                manual_count = len(visible_manual_offers(conn))
             return self.respond(200, {
+                "manual_published": manual_count,
                 "token_configured": bool(TOKEN or oauth_ml.connected(DB)),
                 "oauth_ready": oauth_ml.ready(), "oauth_connected": oauth_ml.connected(DB),
                 "categories": CATEGORIES, "min_discount": PROMO_MIN,
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
-                "total": total, "published": published, "last_sync": LAST_SYNC,
+                "total": total, "published": published + manual_count, "last_sync": LAST_SYNC,
             })
         if path == "/api/admin/catalog/diagnose":
             if not self.is_admin():
@@ -1158,6 +1347,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(502, {"error": "A API Mercado Livre retornou HTTP " + str(exc.code) + " ao consultar categorias."})
             except Exception:
                 return self.respond(502, {"error": "Falha ao consultar categorias do Mercado Livre."})
+        if path == "/api/admin/manual/offers":
+            if not self.is_admin():
+                return
+            with db() as conn:
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT * FROM manual_offers ORDER BY updated_at DESC LIMIT 150"
+                )]
+            return self.respond(200, {"offers": rows})
         if path == "/api/admin/products":
             if not self.is_admin():
                 return
@@ -1176,6 +1373,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             body = self.read_body()
+            if path == "/api/admin/manual/save":
+                return self.respond(200, save_manual_offer(body))
+            if path == "/api/admin/manual/activate":
+                return self.respond(200, change_manual_offer(body))
             if path == "/api/admin/oauth/start":
                 return self.respond(200, {"authorization_url": oauth_ml.start(DB)})
             if path == "/api/admin/item/diagnose":
