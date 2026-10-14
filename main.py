@@ -404,6 +404,113 @@ def verify_and_save(item_id, category, ranking=999):
     return bool(promo)
 
 
+def safe_ml_http_error(exc):
+    """Interpreta erro sem copiar mensagens, URL, headers ou tokens do servidor."""
+    status = int(exc.code) if isinstance(exc.code, int) else 0
+    raw = b""
+    try:
+        raw = exc.read(2048)
+    except (OSError, ValueError, TypeError):
+        pass
+    label = "acesso_restrito" if status == 403 else (
+        "nao_autorizado" if status == 401 else
+        "nao_encontrado" if status == 404 else "erro_http"
+    )
+    # Codigos conhecidos e seguros; NUNCA transmitir body completo ou detalhes desconhecidos.
+    try:
+        payload = json.loads(raw.decode("utf-8", errors="replace"))
+    except (ValueError, UnicodeDecodeError):
+        payload = {}
+    if isinstance(payload, dict):
+        candidates = [str(payload.get(k, "")).lower() for k in ("error", "code")]
+        if any(x in ("invalid scopes", "invalid_scopes", "insufficient_scope") for x in candidates):
+            label = "escopos_insuficientes"
+        elif "invalid_token" in candidates:
+            label = "token_invalido"
+        elif any(x in ("access_denied", "forbidden") for x in candidates):
+            label = "acesso_restrito"
+    return {"state": "http_error", "http_status": status, "reason": label}
+
+
+def diagnose_item_and_price(item_id):
+    """Somente leitura, endpoints separados e resultado minimo seguro para admin.
+
+    Preco pode ser acessivel apesar de /items estar bloqueado: nesse caso jamais
+    confirmar/publicar promocao sem status de anuncio e estoque verificados.
+    """
+    item_id = str(item_id or "").strip().upper()
+    if not VALID_ID.fullmatch(item_id):
+        raise ValueError("Informe um ID de anuncio MLB valido, nao ID de catalogo.")
+    if not (TOKEN or oauth_ml.connected(DB)):
+        return {
+            "id": item_id, "connected": False, "can_publish": False,
+            "item": {"state": "not_checked", "reason": "oauth_pendente"},
+            "sale_price": {"state": "not_checked", "reason": "oauth_pendente"},
+            "message": "Conecte o Mercado Livre no painel antes de testar os endpoints.",
+        }
+
+    outcome = {}
+    item = None
+    sale = None
+    endpoints = [
+        ("item", "/items/" + item_id),
+        ("sale_price", "/items/" + item_id + "/sale_price?context=channel_marketplace"),
+    ]
+    for kind, path in endpoints:
+        try:
+            value = ml_api(path)
+            if not isinstance(value, dict):
+                outcome[kind] = {"state": "invalid_response", "reason": "formato_inesperado"}
+                continue
+            if kind == "item":
+                item = value
+                qty = value.get("available_quantity")
+                available = isinstance(qty, (int, float)) and not isinstance(qty, bool) and qty > 0
+                outcome[kind] = {
+                    "state": "ok", "http_status": 200,
+                    "active": value.get("status") == "active",
+                    "stock_confirmed": available,
+                }
+            else:
+                sale = value
+                amount = positive_amount(value.get("amount"))
+                regular = positive_amount(value.get("regular_amount"))
+                currency = value.get("currency_id")
+                discount = None
+                if currency == "BRL" and amount is not None and regular is not None and regular > amount:
+                    discount = round(100 * (regular - amount) / regular, 2)
+                outcome[kind] = {
+                    "state": "ok", "http_status": 200,
+                    "currency": currency if currency in ("BRL", "USD", "ARS") else "outra",
+                    "amount": amount, "regular_amount": regular,
+                    "discount_percent": discount,
+                    "minimum_discount_met": discount is not None and discount >= PROMO_MIN,
+                }
+        except urllib.error.HTTPError as exc:
+            outcome[kind] = safe_ml_http_error(exc)
+        except (urllib.error.URLError, TimeoutError, OSError):
+            outcome[kind] = {"state": "connection_error", "reason": "consulta_indisponivel"}
+        except (RuntimeError, ValueError, TypeError, KeyError):
+            outcome[kind] = {"state": "invalid_response", "reason": "falha_na_consulta"}
+
+    eligible = bool(item is not None and sale is not None and outcome.get("item", {}).get("stock_confirmed") and verified_promotion(item, sale))
+    # Validador de anuncio segue exigindo estoque seguro, sem divulgar pelo diagnostico.
+    return {
+        "id": item_id, "connected": True,
+        "item": outcome.get("item", {"state": "not_checked"}),
+        "sale_price": outcome.get("sale_price", {"state": "not_checked"}),
+        "promotion_conditions_met": eligible,
+        "can_publish": False,
+        "message": (
+            "Os dois endpoints responderam e as condicoes de desconto foram verificadas. "
+            "Este diagnostico nao cadastra nem publica ofertas."
+            if eligible else
+            "Diagnostico somente leitura: o resultado nao autoriza publicacao. "
+            "Para publicar, e necessario validar o anuncio, o preco e o link de afiliado."
+        ),
+    }
+
+
 def register_affiliate_item(item_id, link):
     """Registra link oficial para anuncio MLB, mesmo sem acesso a busca por categoria.
 
@@ -1071,6 +1178,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             if path == "/api/admin/oauth/start":
                 return self.respond(200, {"authorization_url": oauth_ml.start(DB)})
+            if path == "/api/admin/item/diagnose":
+                result = diagnose_item_and_price(body.get("id", ""))
+                return self.respond(200, result)
             if path == "/api/admin/catalog/candidates":
                 result = find_catalog_listing_candidates(str(body.get("affiliate_url", "")).strip())
                 return self.respond(200, result)

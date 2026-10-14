@@ -41,6 +41,137 @@ class PromotionsTest(unittest.TestCase):
         self.assertIsNone(main.verified_promotion(self.item(status="paused"), self.sale()))
         self.assertIsNone(main.verified_promotion(self.item(), self.sale(92, 100), threshold=10))
 
+    def test_v11_diagnosis_checks_item_and_price_independently(self):
+        from io import BytesIO
+        from urllib.error import HTTPError
+        calls = []
+        def fake_api(path):
+            calls.append(path)
+            if path == "/items/MLB6499468038":
+                return self.item()
+            if path == "/items/MLB6499468038/sale_price?context=channel_marketplace":
+                raise HTTPError(path, 403, "Forbidden", {},
+                                BytesIO(b'{"error":"Invalid scopes","code":"FORBIDDEN","access_token":"SECRET_X"}'))
+            raise AssertionError("unexpected query " + path)
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertEqual(len(calls),2)
+        self.assertEqual(result["item"]["state"],"ok")
+        self.assertEqual(result["sale_price"]["http_status"],403)
+        self.assertEqual(result["sale_price"]["reason"],"escopos_insuficientes")
+        self.assertFalse(result["can_publish"])
+        self.assertFalse(result["promotion_conditions_met"])
+        self.assertNotIn("SECRET_X",json.dumps(result))
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_v11_diagnosis_price_can_succeed_despite_item_403(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        paths = []
+        def fake_api(path):
+            paths.append(path)
+            if path == "/items/MLB6499468038":
+                raise HTTPError(path,403,"Forbidden",{},BytesIO(
+                    b'{"error":"access_denied","message":"Sensitive TOKEN_123987"}'))
+            if path.endswith("/sale_price?context=channel_marketplace"):
+                return self.sale(70,100)
+            raise AssertionError(path)
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertEqual(len(paths),2)
+        self.assertEqual(result["item"]["state"],"http_error")
+        self.assertEqual(result["item"]["reason"],"acesso_restrito")
+        self.assertEqual(result["sale_price"]["amount"],70.0)
+        self.assertEqual(result["sale_price"]["discount_percent"],30.0)
+        self.assertTrue(result["sale_price"]["minimum_discount_met"])
+        self.assertFalse(result["promotion_conditions_met"])
+        self.assertFalse(result["can_publish"])
+        self.assertNotIn("TOKEN_123987",json.dumps(result))
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_v11_diagnosis_both_work_does_not_publish_or_save(self):
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=lambda path:
+                    self.sale(80,100) if "/sale_price?" in path else self.item()):
+                result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertTrue(result["promotion_conditions_met"])
+        self.assertFalse(result["can_publish"])
+        self.assertEqual(result["item"]["http_status"],200)
+        self.assertEqual(result["sale_price"]["http_status"],200)
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_v11_diagnosis_without_oauth_does_not_call_api(self):
+        with patch.object(main,"TOKEN",""):
+            with patch.object(main.oauth_ml,"connected",return_value=False):
+                with patch.object(main,"ml_api") as ml:
+                    result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertFalse(result["connected"])
+        self.assertFalse(result["can_publish"])
+        self.assertEqual(result["item"]["reason"],"oauth_pendente")
+        ml.assert_not_called()
+
+    def test_v11_diagnosis_invalid_ids_rejected(self):
+        for bad in ("", "MLBU12345", "MLBxxx", "MLB123;DELETE"):
+            with self.subTest(id=bad):
+                with self.assertRaises(ValueError):
+                    main.diagnose_item_and_price(bad)
+
+    def test_v11_diagnosis_missing_regular_price_not_promotion(self):
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=lambda path:
+                    {"amount":70,"regular_amount":None,"currency_id":"BRL"}
+                    if "/sale_price?" in path else self.item()):
+                result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertIsNone(result["sale_price"]["discount_percent"])
+        self.assertFalse(result["sale_price"]["minimum_discount_met"])
+        self.assertFalse(result["promotion_conditions_met"])
+
+    def test_v11_diagnosis_no_stock_does_not_claim_promotion(self):
+        without_stock=self.item()
+        without_stock["available_quantity"]=0
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=lambda path:
+                    self.sale() if "/sale_price?" in path else without_stock):
+                result=main.diagnose_item_and_price("MLB6499468038")
+        self.assertFalse(result["item"]["stock_confirmed"])
+        self.assertFalse(result["promotion_conditions_met"])
+
+    def test_v11_diagnostic_endpoint_is_admin_only(self):
+        server=main.ThreadingHTTPServer(("127.0.0.1",0),main.Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        try:
+            payload=json.dumps({"id":"MLB6499468038"})
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("POST","/api/admin/item/diagnose",body=payload,
+                         headers={"Content-Type":"application/json"})
+            response=conn.getresponse()
+            self.assertEqual(response.status,403)
+            response.read()
+            conn.close()
+            with patch.object(main,"diagnose_item_and_price",return_value={
+                "id":"MLB6499468038","item":{"state":"ok"},
+                "sale_price":{"state":"http_error","http_status":403},
+                "can_publish":False
+            }) as diagnose:
+                conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+                conn.request("POST","/api/admin/item/diagnose",body=payload,
+                    headers={"X-Admin-Key":"test-key-only","Content-Type":"application/json"})
+                response=conn.getresponse()
+                self.assertEqual(response.status,200)
+                data=json.loads(response.read())
+                self.assertFalse(data["can_publish"])
+                diagnose.assert_called_once_with("MLB6499468038")
+                conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_catalog_diagnosis_reports_structure_without_secrets(self):
         requested = []
         def fake_api(path):

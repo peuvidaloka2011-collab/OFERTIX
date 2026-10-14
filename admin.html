@@ -59,6 +59,15 @@ a{color:#09683d}#app{display:none}
 </details>
 <p id="linkFeedback" class="feedback" role="status">Cole seu link e toque em Identificar e verificar oferta. Se não for possível localizar o ID, o sistema informará o motivo.</p>
 <p class="muted">Só são publicadas ofertas cuja API confirme um desconto de pelo menos 10%. Caso o link aponte para catálogo, nenhuma publicação será inventada. O domínio do link, sozinho, não comprova a atribuição de comissão.</p></section>
+<section class="panel"><h2>Diagnóstico de anúncio e preço — V11</h2>
+<p>Teste separadamente os dados de um anúncio e o preço. Use um ID MLB de vendedor. Esta ferramenta é apenas de diagnóstico: <b>não cadastra, publica ou altera ofertas</b>.</p>
+<div class="row">
+  <input id="diagnosticItem" aria-label="ID para diagnóstico" placeholder="MLB6499468038" autocapitalize="characters">
+  <button id="diagnoseItem" type="button" class="secondary">Testar anúncio e preço</button>
+</div>
+<p id="diagnosticFeedback" class="feedback" role="status">Informe o ID do anúncio para verificar os dois endpoints oficiais.</p>
+<p class="muted">HTTP 403 pode indicar falta de permissão. Nenhum token, chave secreta ou resposta bruta da API aparece neste painel. Um preço acessível não é suficiente para autorizar a publicação.</p>
+</section>
 <section class="panel"><h2>Produtos encontrados</h2><div class="table-scroll"><table><thead><tr><th>ID</th><th>Produto</th><th>Desconto</th><th>Status</th><th>Ação</th></tr></thead><tbody id="products"><tr><td colspan="5">Nenhum produto importado.</td></tr></tbody></table></div></section>
 </div>
 </main>
@@ -165,7 +174,7 @@ async function load(){
     const status=cell(item.is_promo?(item.affiliate_url?"Promoção com link":"Aguardando link"):(item.affiliate_url&&!item.promo_checked_at?"Aguardando verificação":item.affiliate_url?"Sem desconto confirmado":"Sem promoção"));
     const action=document.createElement("td"),button=document.createElement("button");
     button.textContent="Selecionar";button.className="secondary";button.addEventListener("click",()=>{
-      $("advanced").open=true;$("item").value=item.id;$("link").value=item.affiliate_url||"";$("link").scrollIntoView({behavior:"smooth",block:"center"});
+      $("advanced").open=true;$("item").value=item.id;$("diagnosticItem").value=item.id;$("link").value=item.affiliate_url||"";$("link").scrollIntoView({behavior:"smooth",block:"center"});
     });
     action.append(button);tr.append(id,title,disc,status,action);$("products").append(tr);
   }
@@ -245,6 +254,7 @@ $("lookupCatalog").addEventListener("click",async()=>{
       select.addEventListener("click",()=>{
         $("advanced").open=true;
         $("item").value=offer.id;
+        $("diagnosticItem").value=offer.id;
         $("linkFeedback").className="feedback";
         $("linkFeedback").textContent="ID selecionado: "+offer.id+
           "\nAntes de salvar, confirme na Central de Afiliados que o link corresponde ao anúncio selecionado. Se necessário, gere um novo link para esse anúncio.";
@@ -256,6 +266,57 @@ $("lookupCatalog").addEventListener("click",async()=>{
     $("linkFeedback").textContent="Não foi possível localizar anúncios do catálogo: "+e.message+
       "\nA API pode restringir o acesso. Não será criada uma oferta sem verificação.";
     $("linkFeedback").className="feedback error";
+  }finally{button.disabled=false;}
+});
+$("diagnoseItem").addEventListener("click",async()=>{
+  const button=$("diagnoseItem");
+  const id=$("diagnosticItem").value.trim().toUpperCase();
+  button.disabled=true;
+  $("diagnosticFeedback").className="feedback";
+  $("diagnosticFeedback").textContent="Testando os endpoints /items e /sale_price de forma independente...";
+  try{
+    const result=await request("/api/admin/item/diagnose",{
+      method:"POST",body:JSON.stringify({id})
+    });
+    function describe(name,part){
+      const title=name+" — ";
+      if(part.state==="ok"){
+        if(name==="Anúncio"){
+          return title+"HTTP 200"+
+            "\nStatus ativo: "+(part.active?"Sim":"Não")+
+            "\nEstoque disponível: "+(part.stock_confirmed?"Sim":"Não confirmado");
+        }
+        return title+"HTTP 200"+
+          "\nPreço atual: "+(part.amount??"indisponível")+
+          "\nPreço original: "+(part.regular_amount??"indisponível")+
+          "\nMoeda: "+(part.currency??"não informada")+
+          "\nDesconto identificado: "+(part.discount_percent==null?"não confirmado":part.discount_percent+"%")+
+          "\nDesconto mínimo: "+(part.minimum_discount_met?"Sim":"Não confirmado");
+      }
+      if(part.state==="http_error"){
+        const reasons={
+          escopos_insuficientes:"escopos insuficientes",
+          acesso_restrito:"acesso restrito",
+          token_invalido:"token inválido",
+          nao_autorizado:"não autorizado",
+          nao_encontrado:"recurso não encontrado",
+          erro_http:"erro HTTP"
+        };
+        return title+"HTTP "+part.http_status+" — "+(reasons[part.reason]||"acesso indisponível");
+      }
+      return title+(part.reason==="oauth_pendente"?"Conecte o Mercado Livre.":"Não foi possível concluir a consulta.");
+    }
+    $("diagnosticFeedback").textContent=
+      "Diagnóstico do anúncio "+result.id+
+      "\n\n"+describe("Anúncio",result.item)+
+      "\n\n"+describe("Preço",result.sale_price)+
+      "\n\n"+result.message+
+      "\n\nNenhuma oferta foi publicada ou alterada por esse teste.";
+    $("diagnosticFeedback").className="feedback"+
+      (result.item.state==="ok"&&result.sale_price.state==="ok"?"":" error");
+  }catch(e){
+    $("diagnosticFeedback").textContent="Falha no diagnóstico: "+e.message;
+    $("diagnosticFeedback").className="feedback error";
   }finally{button.disabled=false;}
 });
 $("save").addEventListener("click",async()=>{
