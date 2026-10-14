@@ -14,6 +14,11 @@ button:disabled{opacity:.5;cursor:wait}
 h2{margin-top:0;font-size:21px}p{line-height:1.5}
 #message{white-space:pre-wrap;padding:12px;border-radius:10px;color:#205439;background:#e7f5eb}
 .muted{color:#687f71;font-size:13px}
+.feedback{padding:13px;border-radius:10px;background:#eef9f1;border:1px solid #b9ddc6;margin:14px 0;white-space:pre-wrap;line-height:1.5}
+.feedback.error{background:#fff1ee;border-color:#edb6a7;color:#8a2a1a}
+.child-list{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.child-list button{font-size:13px;background:#325b46}
+.child-list button:hover{background:#17432d}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
 .stat{background:#eff8f0;border-radius:12px;padding:14px}.stat b{display:block;font-size:21px}
 table{width:100%;border-collapse:collapse;font-size:14px}td,th{padding:11px;border-bottom:1px solid #e8eee9;text-align:left;vertical-align:middle}
@@ -35,8 +40,10 @@ a{color:#09683d}#app{display:none}
 <p>Autorize a conta Mercado Livre vinculada à aplicação OFERTIX. A autorização usa PKCE e senha administrativa; nenhum token aparece no navegador.</p>
 <div class="row"><button id="oauth">Preparar autorização</button><a id="oauthLink" style="display:none" target="_blank" rel="noopener noreferrer" href="#">Autorizar Mercado Livre ↗</a></div>
 <p class="muted">Depois de autorizar, volte para esta aba e toque em Atualizar painel. Esta versão de testes usa armazenamento temporário no Render Free.</p></section>
-<section class="panel"><h2>Importar produtos populares</h2><p>Informe o ID de uma categoria do Mercado Livre (por exemplo <code>MLB1051</code>). A verificação publica apenas os itens com desconto confirmado. Os links de afiliado precisam ser associados separadamente.</p>
-<div class="row"><input id="category" placeholder="ID da categoria (MLB...)" value="MLB1051" autocapitalize="characters"><button id="import">Importar e verificar</button><button id="refresh" class="secondary">Revalidar ofertas</button></div>
+<section class="panel"><h2>Importar produtos populares</h2><p>Informe uma categoria final do Mercado Livre. Se usar uma categoria ampla, como <code>MLB1051</code>, toque em <b>Buscar subcategorias</b> e escolha uma opção até chegar à categoria final. A verificação só publica promoções com desconto confirmado e link oficial de afiliado.</p>
+<div class="row"><input id="category" placeholder="ID da categoria (MLB...)" value="MLB1051" autocapitalize="characters"><button id="import">Importar e verificar</button><button id="browse" class="secondary">Buscar subcategorias</button><button id="refresh" class="secondary">Revalidar ofertas</button></div>
+<p id="importFeedback" class="feedback" role="status">Escolha uma categoria final. O resultado da importação aparecerá aqui.</p>
+<div id="subcategories" class="child-list" aria-label="Subcategorias encontradas"></div>
 <p class="muted">Para importar categorias automaticamente durante a execução, configure <code>OFERTIX_CATEGORIES</code> no Render, separando os IDs por vírgulas. No Render gratuito, o processo pode hibernar e não executar a tarefa no horário.</p></section>
 <section class="panel"><h2>Associar link de afiliado oficial</h2><p>Gere o URL na Central de Afiliados do Mercado Livre e cole aqui. Um link comum não garante comissão.</p>
 <div class="row"><input id="item" placeholder="ID do produto: MLB123456"><input id="link" type="url" placeholder="https://meli.la/..."><button id="save">Salvar link</button></div>
@@ -54,6 +61,54 @@ async function request(path,options){
   const data=await res.json();
   if(!res.ok)throw Error(data.error||"Falha "+res.status);
   return data;
+}
+function importInfo(message,error=false){
+  $("importFeedback").textContent=message;
+  $("importFeedback").className="feedback"+(error?" error":"");
+}
+function renderSubcategories(data){
+  $("subcategories").replaceChildren();
+  const items=Array.isArray(data.subcategories)?data.subcategories:[];
+  for(const sub of items){
+    const button=document.createElement("button");
+    button.type="button";button.textContent=sub.name+" ("+sub.id+")";
+    button.addEventListener("click",()=>{$("category").value=sub.id;browseCategory();});
+    $("subcategories").append(button);
+  }
+}
+async function browseCategory(){
+  const id=$("category").value.trim().toUpperCase();
+  importInfo("Consultando "+id+"...");
+  try{
+    const result=await request("/api/admin/category?id="+encodeURIComponent(id));
+    renderSubcategories(result);
+    importInfo(result.is_final
+      ?"Categoria final: "+result.name+" ("+result.id+"). Toque em Importar e verificar."
+      :"Categoria: "+result.name+" ("+result.id+"). Escolha uma subcategoria abaixo; repita até chegar à categoria final."
+    );
+  }catch(e){importInfo("Erro na categoria: "+e.message,true);}
+}
+async function importCategory(){
+  const id=$("category").value.trim().toUpperCase();
+  $("import").disabled=true;importInfo("Consultando produtos e preços para "+id+". Aguarde...");$("subcategories").replaceChildren();
+  try{
+    const data=await request("/api/admin/import",{method:"POST",body:JSON.stringify({category:id})});
+    renderSubcategories(data);
+    if(data.requires_subcategory){
+      importInfo(data.message+" Toque nas subcategorias abaixo.");
+    }else if(data.ranking_unavailable){
+      importInfo(data.message,true);
+    }else{
+      importInfo("Verificação concluída!\nProdutos analisados: "+data.checked+
+        "\nPromoções com desconto confirmado: "+data.promotions+
+        "\nSem desconto: "+data.without_discount+
+        "\nFalhas ao consultar produto: "+data.failed+
+        "\nTipos de catálogo não processados: "+data.catalog_types_not_supported+
+        "\n"+(data.message||""));
+    }
+    await load();
+  }catch(e){importInfo("Não foi possível importar: "+e.message,true);}
+  finally{$("import").disabled=false;}
 }
 async function load(){
   const [s,p]=await Promise.all([request("/api/admin/status"),request("/api/admin/products")]);
@@ -99,7 +154,8 @@ $("enter").addEventListener("click",async()=>{
   try{await load();$("key").value="";info("Acesso autorizado.");}
   catch(e){key="";info("Não foi possível entrar: "+e.message);}
 });
-$("import").addEventListener("click",()=>op("/api/admin/import",{category:$("category").value},"Importação concluída."));
+$("import").addEventListener("click",importCategory);
+$("browse").addEventListener("click",browseCategory);
 $("refresh").addEventListener("click",()=>op("/api/admin/refresh",{},"Revalidação concluída."));
 $("save").addEventListener("click",()=>op("/api/admin/link",{id:$("item").value,affiliate_url:$("link").value},"Link registrado."));
 $("reload").addEventListener("click",()=>load().catch(e=>info("Erro: "+e.message)));
