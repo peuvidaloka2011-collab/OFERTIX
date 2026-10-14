@@ -1,111 +1,364 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#103b2d">
-  <title>OFERTIX — Ofertas e promoções</title>
-  <style>
-    :root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172f27;background:#f3f7f4}
-    *{box-sizing:border-box}body{margin:0}
-    header{background:#103b2d;color:white;padding:22px max(20px,calc((100vw - 1160px)/2));display:flex;justify-content:space-between;align-items:center;gap:12px}
-    .brand{font-size:29px;font-weight:900;letter-spacing:-1.2px}.brand span{color:#7cf0a8}
-    .subtitle{font-size:12px;color:#bad7c7}header a{color:#d2f9df;text-decoration:none;font-weight:700}
-    main{max-width:1160px;margin:auto;padding:24px 18px 70px}
-    .hero{border-radius:22px;background:linear-gradient(125deg,#136640,#103b2d);color:white;padding:34px;display:flex;align-items:center;justify-content:space-between;gap:18px}
-    .hero h1{font-size:clamp(24px,4vw,38px);margin:0 0 10px}.hero p{margin:0;max-width:560px;color:#d0f1dc;line-height:1.5}
-    .hero .graphic{font-size:60px}
-    .tools{display:flex;gap:12px;flex-wrap:wrap;margin:24px 0}
-    input,select{font:inherit;padding:13px 14px;border:1px solid #d5e4da;background:white;border-radius:12px;color:#172f27}
-    #search{min-width:200px;flex:1}select{min-width:160px}
-    .notice{border-radius:12px;padding:13px 16px;background:#fff9e8;color:#755a17;border:1px solid #f4dfa3;font-size:13px;line-height:1.5;margin:0 0 24px}
-    .section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-    .section-head h2{font-size:22px}#count{font-size:13px;color:#527161}
-    .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:18px}
-    .card{overflow:hidden;border:1px solid #dfede3;background:white;border-radius:18px;box-shadow:0 4px 16px #092e2010;display:flex;flex-direction:column}
-    .media{position:relative;height:180px;display:flex;justify-content:center;align-items:center;background:#f8fbf8}
-    .media img{width:100%;height:100%;object-fit:contain;padding:14px}
-    .off{position:absolute;left:12px;top:12px;background:#087640;color:white;font-size:14px;font-weight:900;padding:7px 10px;border-radius:10px}
-    .source{font-size:12px;color:#745423;background:#fff5d6;padding:8px 10px;border-radius:9px;line-height:1.4;margin-bottom:12px}
-    .expiry{font-size:11px;color:#65796c;margin-top:8px}
-    .info{padding:17px;display:flex;flex-direction:column;flex:1}
-    .category{font-size:12px;color:#52866b;font-weight:700}
-    .info h3{font-size:16px;line-height:1.4;margin:10px 0 14px;flex:1}
-    .old{font-size:13px;text-decoration:line-through;color:#8b9990}
-    .price{font-size:25px;font-weight:900;color:#0b6940;margin:4px 0 14px}
-    .btn{display:block;text-align:center;border-radius:12px;background:#12854a;color:white;text-decoration:none;padding:13px;font-weight:800}
-    .btn:hover{background:#0c6b3b}
-    .empty{background:white;border:1px dashed #b9d5c4;border-radius:16px;padding:45px 20px;text-align:center;color:#48685a;grid-column:1/-1}
-    footer{padding:25px 18px;text-align:center;color:#668075;font-size:12px;line-height:1.6}
-    @media(max-width:600px){header{padding:18px}.hero{padding:23px}.hero .graphic{display:none}}
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4511e">
+<meta name="description" content="OFERTIX reúne ofertas de lojas parceiras para você pesquisar produtos, comparar preços informados e comprar diretamente na loja.">
+<title>OFERTIX | Ofertas e promoções de lojas parceiras</title>
+<style>
+:root{
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  color:#303033;background:#f5f5f5;font-synthesis:none;
+  --brand:#ee4d2d;--brand-deep:#de391b;--soft:#fff2ed;--muted:#757575;--border:#eaeaea;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;min-width:320px}
+a{color:inherit}
+button,input,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #ffae61;outline-offset:3px}
+.container{width:min(1200px,calc(100% - 36px));margin-inline:auto}
+.announcement{background:#d93b21;color:#fff;font-size:12px}
+.announcement .container{min-height:31px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.announcement a{text-decoration:underline;text-underline-offset:3px}
+.site-header{position:sticky;top:0;z-index:10;background:linear-gradient(105deg,#f4511e,#ff7444);color:#fff;box-shadow:0 2px 12px #743b2022}
+.header-inner{padding:17px 0 16px;display:flex;align-items:center;gap:32px}
+.brand{font-size:35px;line-height:1;font-weight:950;letter-spacing:-1.8px;white-space:nowrap;text-decoration:none}
+.brand span{color:#fff1b0}
+.brand small{display:block;font-size:10px;line-height:1.2;letter-spacing:.25px;margin-top:5px;font-weight:600}
+.search-wrap{flex:1;position:relative;display:flex;min-width:0;border-radius:5px;background:#fff;padding:4px;box-shadow:0 2px 6px #a8431d16}
+.search-wrap label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+#search{height:41px;flex:1;min-width:0;border:0;padding:0 13px;color:#333;font-size:14px;background:transparent;outline:0}
+#search:focus-visible{outline:2px solid #e8804a;outline-offset:-2px}
+#search::placeholder{color:#969696}
+.search-action{background:var(--brand);color:#fff;border:0;border-radius:4px;min-width:65px;font-size:22px}
+.header-link{display:flex;gap:9px;align-items:center;text-decoration:none;font-weight:700;font-size:13px;white-space:nowrap}
+.header-link strong{font-size:23px}
+.subnav{background:#fff;border-bottom:1px solid var(--border)}
+.subnav .container{display:flex;align-items:center;gap:21px;min-height:43px;overflow-x:auto}
+.subnav a{text-decoration:none;font-size:13px;font-weight:650;color:#5a5a5a;white-space:nowrap}
+.subnav a:hover{color:var(--brand)}
+main{padding-top:20px;padding-bottom:58px}
+.hero{background:linear-gradient(105deg,#fc5b2a,#ff8e42 68%,#ffba59);color:#fff;display:grid;grid-template-columns:minmax(0,1fr) 260px;min-height:223px;border-radius:7px;overflow:hidden;position:relative}
+.hero-text{padding:30px 38px;position:relative;z-index:1}
+.eyebrow{font-size:12px;font-weight:850;text-transform:uppercase;letter-spacing:1.1px;display:inline-block;background:#ffffff2b;border:1px solid #ffffff55;padding:6px 10px;border-radius:20px}
+.hero h1{font-size:clamp(26px,3.5vw,41px);letter-spacing:-1.2px;line-height:1.12;margin:15px 0 10px;max-width:610px}
+.hero p{line-height:1.48;font-size:14px;max-width:570px;margin:0 0 19px}
+.hero-btn{background:#fff;color:#d84224;display:inline-block;text-decoration:none;font-size:13px;font-weight:800;padding:12px 20px;border-radius:5px}
+.hero-art{display:flex;justify-content:center;align-items:center;position:relative}
+.hero-art::before{content:"";position:absolute;background:#ffffff24;border:2px solid #ffffff2b;width:290px;height:290px;border-radius:50%;transform:translate(25px,48px)}
+.hero-art span{font-size:112px;position:relative;filter:drop-shadow(0 13px 9px #b94c2580);transform:rotate(-11deg)}
+.hero-note{position:absolute;right:19px;bottom:18px;background:#fff9;border-radius:5px;padding:7px 10px;color:#914c25;font-size:11px;font-weight:750}
+.perks{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e9e9e9;margin-top:14px;border-radius:6px;overflow:hidden}
+.perk{display:flex;align-items:center;gap:11px;background:white;padding:15px 17px}
+.perk-icon{font-size:23px}
+.perk strong{display:block;font-size:13px}
+.perk small{font-size:11px;color:#777;line-height:1.5}
+.section-title{display:flex;align-items:center;justify-content:space-between;gap:15px;margin:29px 0 15px}
+.section-title h2{margin:0;font-size:19px;font-weight:850;color:#333}
+.section-title .hint{color:#777;font-size:12px}
+.category-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#ebebeb;border:1px solid #ebebeb;border-radius:6px;overflow:hidden}
+.cat-chip{background:#fff;border:0;color:#424242;min-height:91px;padding:14px 7px;text-align:center;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;transition:background .15s}
+.cat-chip .emoji{font-size:25px}
+.cat-chip .cat-title{font-size:12px;font-weight:650;max-width:100%;overflow-wrap:anywhere}
+.cat-chip:hover,.cat-chip.active{background:#fff5f1;color:var(--brand)}
+.cat-chip.active{box-shadow:inset 0 -3px var(--brand)}
+.category-empty{grid-column:1/-1;padding:20px;text-align:center;background:#fff;color:#777;font-size:13px}
+.deals-heading{background:#fff;border-bottom:3px solid var(--brand);padding:17px 18px;margin-top:27px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.deals-heading h2{margin:0;color:var(--brand);font-size:20px;font-weight:900;letter-spacing:.25px}
+.deals-heading span{font-size:12px;color:#888}
+.filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:13px 12px;background:#fff;margin-bottom:13px}
+.filters label{font-size:12px;color:#777;font-weight:650}
+.filters select{min-width:150px;padding:11px;border:1px solid #e6e6e6;border-radius:4px;background:#fff;color:#555;font-size:13px}
+#count{margin-left:auto;font-size:12px;color:#666}
+.cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.card{background:#fff;border:1px solid #ededed;border-radius:5px;overflow:hidden;display:flex;flex-direction:column;min-width:0;transition:transform .15s,box-shadow .15s}
+.card:hover{transform:translateY(-3px);box-shadow:0 4px 15px #00000018;border-color:#ffb3a1}
+.media{height:195px;position:relative;display:flex;align-items:center;justify-content:center;background:#fafafa}
+.media img{max-width:100%;width:100%;height:100%;object-fit:contain;padding:8px}
+.fallback{font-size:62px}
+.discount-badge{position:absolute;right:0;top:0;max-width:95px;background:#ffe9b1;color:#d74710;font-size:12px;font-weight:900;text-align:center;padding:7px 8px;border-radius:0 0 0 6px}
+.info{display:flex;flex-direction:column;flex:1;padding:12px}
+.shop{font-size:11px;font-weight:700;color:#757575;margin-bottom:7px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.info h3{font-size:13px;line-height:1.42;font-weight:650;margin:0 0 10px;min-height:55px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.pricing{margin-top:auto}
+.old{font-size:12px;color:#999;text-decoration:line-through}
+.price{font-size:21px;color:var(--brand);font-weight:900;margin:3px 0 8px;letter-spacing:-.5px}
+.source{font-size:10px;line-height:1.4;color:#806744;background:#fffaee;padding:7px;border-radius:4px;min-height:45px;margin-bottom:9px}
+.btn{display:block;text-align:center;background:var(--brand);color:#fff;text-decoration:none;border-radius:4px;padding:10px 5px;font-size:12px;font-weight:850}
+.btn:hover{background:var(--brand-deep)}
+.empty{grid-column:1/-1;text-align:center;background:#fff;color:#666;padding:45px 16px;border-radius:5px;font-size:14px}
+.disclosure{font-size:12px;line-height:1.65;color:#6e5d52;background:#fff9ed;border:1px solid #f5e6ca;padding:15px 17px;margin:24px 0 0;border-radius:5px}
+footer{background:#fff;border-top:3px solid var(--brand);font-size:12px;color:#777;line-height:1.7}
+.footer-inner{padding:26px 0;display:flex;justify-content:space-between;gap:20px}
+footer strong{font-size:21px;color:var(--brand);letter-spacing:-1px}
+@media(max-width:1020px){
+  .cards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .category-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .hero{grid-template-columns:minmax(0,1fr) 185px}
+  .hero-art span{font-size:90px}
+}
+@media(max-width:740px){
+  .header-inner{gap:12px;flex-wrap:wrap;padding:13px 0}
+  .brand{font-size:28px}
+  .brand small{font-size:9px}
+  .header-link{margin-left:auto}
+  .search-wrap{order:3;flex-basis:100%}
+  .hero{grid-template-columns:1fr;min-height:0}
+  .hero-text{padding:25px 24px}
+  .hero-art{display:none}
+  .perks{grid-template-columns:1fr}
+  .cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:520px){
+  .container{width:calc(100% - 18px)}
+  .announcement .container{font-size:10px}
+  main{padding-top:9px}
+  .hero-text{padding:22px 20px}
+  .hero h1{font-size:26px}
+  .hero p{font-size:13px}
+  .perks{grid-template-columns:1fr 1fr}
+  .perk{padding:11px 9px;gap:7px}
+  .perk:last-child{grid-column:1/-1}
+  .perk-icon{font-size:19px}
+  .perk strong{font-size:11px}
+  .perk small{font-size:10px}
+  .category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cat-chip{min-height:79px;padding:8px 4px}
+  .cat-chip .emoji{font-size:22px}
+  .cat-chip .cat-title{font-size:11px}
+  .section-title{margin:24px 3px 12px}
+  .section-title h2{font-size:17px}
+  .deals-heading{padding:14px 11px}
+  .deals-heading h2{font-size:17px}
+  .filters{gap:7px;padding:11px 8px}
+  .filters select{flex:1;min-width:125px}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .media{height:155px}
+  .info{padding:9px}
+  .info h3{font-size:12px;min-height:51px}
+  .price{font-size:19px}
+  .source{font-size:10px;min-height:58px}
+  .footer-inner{flex-direction:column}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.card{transition:none}}
+</style>
 </head>
 <body>
-<header><div><div class="brand">OFERT<span>IX</span></div><div class="subtitle">Ofertas verificadas e ofertas informadas pelo afiliado</div></div><a href="#ofertas">Ver promoções ↓</a></header>
-<main>
-  <section class="hero"><div><h1>Ofertas para comparar e economizar.</h1><p>Encontre ofertas verificadas pela API e descontos informados pelo afiliado, sempre identificados. Confira os valores na loja antes de comprar.</p></div><div class="graphic" aria-hidden="true">🏷️</div></section>
-  <div class="tools"><input type="search" id="search" placeholder="Pesquisar promoções..." aria-label="Pesquisar produtos"><select id="category" aria-label="Categoria"><option value="">Todas as categorias</option></select></div>
-  <p class="notice"><strong>Publicidade e transparência:</strong> o OFERTIX divulga links de afiliado e pode receber comissão por compras elegíveis. Algumas ofertas têm preços informados manualmente pelo afiliado, <strong>sem verificação automática pela API</strong>; cada card identifica sua origem. Confira preços, descontos, estoque e frete diretamente no Mercado Livre antes de finalizar a compra.</p>
-  <div class="section-head"><h2 id="ofertas">Promoções disponíveis</h2><span id="count" role="status">Consultando ofertas…</span></div>
-  <div id="cards" class="cards" aria-live="polite"></div>
+<div class="announcement">
+  <div class="container">
+    <span>OFERTIX · Ofertas de lojas parceiras</span>
+    <span>Publicidade · Links de afiliados</span>
+  </div>
+</div>
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="/" aria-label="OFERTIX - página inicial">OFERT<span>IX</span><small>ENCONTRE. COMPARE. ECONOMIZE.</small></a>
+    <div class="search-wrap">
+      <label for="search">Pesquisar produtos e lojas</label>
+      <input id="search" type="search" placeholder="O que você está procurando?" autocomplete="off" maxlength="140">
+      <button class="search-action" id="searchSubmit" type="button" aria-label="Buscar produtos">⌕</button>
+    </div>
+    <a class="header-link" href="#ofertas"><strong aria-hidden="true">🛍️</strong> Ver ofertas</a>
+  </div>
+</header>
+<nav class="subnav" aria-label="Navegação principal">
+  <div class="container">
+    <a href="#categorias">Categorias</a>
+    <a href="#ofertas">Ofertas em destaque</a>
+    <a href="#lojas">Lojas parceiras</a>
+    <a href="#transparencia">Como funciona</a>
+  </div>
+</nav>
+<main class="container">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-text">
+      <span class="eyebrow">Sua vitrine de ofertas</span>
+      <h1 id="hero-title">Promoções de várias lojas em um só lugar</h1>
+      <p>Pesquise produtos, compare os preços informados pelas lojas e encontre ofertas com links de afiliado. A compra é finalizada diretamente na loja parceira.</p>
+      <a class="hero-btn" href="#ofertas">Explorar promoções →</a>
+    </div>
+    <div class="hero-art" aria-hidden="true"><span>🛍️</span><div class="hero-note">OFERTIX</div></div>
+  </section>
+  <section class="perks" aria-label="Como funciona">
+    <div class="perk"><span class="perk-icon" aria-hidden="true">🔎</span><div><strong>Pesquise produtos</strong><small>Encontre ofertas pelo nome</small></div></div>
+    <div class="perk"><span class="perk-icon" aria-hidden="true">🏷️</span><div><strong>Compare preços</strong><small>Confira os valores na loja</small></div></div>
+    <div class="perk"><span class="perk-icon" aria-hidden="true">🛒</span><div><strong>Compre na parceira</strong><small>Pagamento direto no site da loja</small></div></div>
+  </section>
+  <section id="categorias" aria-labelledby="categories-title">
+    <div class="section-title">
+      <h2 id="categories-title">Categorias para você</h2>
+      <span class="hint">Atualizadas conforme o catálogo disponível</span>
+    </div>
+    <div id="categoryGrid" class="category-grid"><div class="category-empty">Carregando categorias disponíveis…</div></div>
+  </section>
+  <section aria-labelledby="deals-title">
+    <div id="ofertas" class="deals-heading">
+      <h2 id="deals-title">OFERTAS E PROMOÇÕES</h2>
+      <span>Descontos informados pelas lojas e pela plataforma</span>
+    </div>
+    <div id="lojas" class="filters">
+      <label for="merchant">Loja</label>
+      <select id="merchant"><option value="">Todas as lojas</option></select>
+      <label for="category">Categoria</label>
+      <select id="category"><option value="">Todas as categorias</option></select>
+      <label for="sort">Ordenar</label>
+      <select id="sort">
+        <option value="discount">Maior desconto</option>
+        <option value="low">Menor preço</option>
+        <option value="high">Maior preço</option>
+        <option value="name">Nome A–Z</option>
+      </select>
+      <span id="count" role="status">Consultando ofertas…</span>
+    </div>
+    <div id="cards" class="cards" aria-live="polite"></div>
+  </section>
+  <section id="transparencia" class="disclosure">
+    <strong>Transparência e publicidade:</strong> o OFERTIX divulga produtos por links de afiliados e pode receber comissões por compras elegíveis. Os preços podem vir de feeds fornecidos pelas lojas, de consultas oficiais à API ou de cadastro manual; a origem aparece em cada produto. Valores anteriores e percentuais são informações disponibilizadas pela respectiva fonte, não garantias do menor preço histórico. Um asterisco (*) indica desconto não verificado automaticamente pela API de preços. Verifique preço, desconto, frete e estoque no site da loja antes de comprar.
+  </section>
 </main>
-<footer>OFERTIX • O pagamento e a entrega são de responsabilidade da loja parceira. Confira as condições antes de comprar.</footer>
+<footer>
+  <div class="container footer-inner">
+    <div><strong>OFERTIX</strong><div>Encontre. Compare. Economize.</div></div>
+    <div>Os pagamentos e as entregas são realizados pelas lojas parceiras.<div>Links de compra podem gerar comissão para o OFERTIX.</div></div>
+  </div>
+</footer>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
-const brl = value => Number(value).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-let products = [];
-function element(tag,className,value){
-  const n=document.createElement(tag); if(className)n.className=className;
-  if(value!==undefined)n.textContent=value;return n;
+const brl = n => Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const catIcon = category => {
+  const name=String(category||"").toLocaleLowerCase("pt-BR");
+  if(/eletr|informat|comput|smart|celular|audio|áudio|fone|telefon/.test(name))return "📱";
+  if(/casa|cozinha|moveis|móveis|jardim|decora/.test(name))return "🏠";
+  if(/moda|roupa|vestu|sapato|calçado/.test(name))return "👕";
+  if(/beleza|cosmet|perfume|saúde|saude/.test(name))return "💄";
+  if(/auto|carro|moto|veículo/.test(name))return "🚗";
+  if(/esporte|fitness|bicicleta|bike/.test(name))return "🚲";
+  if(/game|jogo|brinquedo/.test(name))return "🎮";
+  if(/pet|animal/.test(name))return "🐾";
+  return "🛍️";
+};
+const element=(tag,cls,value)=>{
+  const node=document.createElement(tag);
+  if(cls)node.className=cls;
+  if(value!==undefined)node.textContent=value;
+  return node;
+};
+let products=[];
+function renderCategories(){
+  const grid=$("categoryGrid");
+  const selected=$("category").value;
+  const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  grid.replaceChildren();
+  if(!categories.length){
+    grid.append(element("div","category-empty","As categorias aparecerão aqui assim que houver ofertas autorizadas."));
+    return;
+  }
+  const options=[{name:"Todas",key:"",icon:"🛒"},...categories.slice(0,11).map(c=>({name:c,key:c,icon:catIcon(c)}))];
+  for(const item of options){
+    const button=element("button","cat-chip"+(item.key===selected?" active":""),"");
+    button.type="button";
+    button.setAttribute("aria-pressed",item.key===selected?"true":"false");
+    button.append(element("span","emoji",item.icon),element("span","cat-title",item.name));
+    button.addEventListener("click",()=>{
+      $("category").value=item.key;
+      renderCategories();render();
+      $("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
+    });
+    grid.append(button);
+  }
 }
 function render(){
   const query=$("search").value.toLocaleLowerCase("pt-BR").trim();
   const category=$("category").value;
-  const showing=products.filter(p=>String(p.title).toLocaleLowerCase("pt-BR").includes(query)&&(!category||p.category===category));
-  $("count").textContent=showing.length+" promoção(ões)";
+  const merchant=$("merchant").value;
+  const sort=$("sort").value;
+  const showing=products.filter(p=>
+    (String(p.title)+" "+String(p.merchant||"Mercado Livre")+" "+String(p.category||""))
+      .toLocaleLowerCase("pt-BR").includes(query) &&
+    (!category||p.category===category) &&
+    (!merchant||(p.merchant||"Mercado Livre")===merchant)
+  );
+  showing.sort((a,b)=>{
+    if(sort==="low")return Number(a.price)-Number(b.price);
+    if(sort==="high")return Number(b.price)-Number(a.price);
+    if(sort==="name")return String(a.title).localeCompare(String(b.title),"pt-BR");
+    return Number(b.discount_percent)-Number(a.discount_percent);
+  });
+  $("count").textContent=showing.length+" produto(s)";
   $("cards").replaceChildren();
   if(!showing.length){
-    $("cards").append(element("div","empty",products.length?"Nenhuma promoção encontrada com esses filtros.":"Não há ofertas com links de afiliado neste momento. Volte mais tarde."));
+    $("cards").append(element("div","empty",
+      products.length?"Nenhuma oferta encontrada com esses filtros. Experimente outra busca.":
+      "Ainda não há ofertas de lojas parceiras disponíveis. Estamos aguardando catálogos autorizados."));
     return;
   }
   for(const p of showing){
-    const card=element("article","card"), visual=element("div","media"), body=element("div","info");
-    const off=element("span","off",Math.floor(Number(p.discount_percent))+"% OFF"+(p.pricing_source==="manual"?"*":""));
-    visual.append(off);
-    if(p.image && (/^https:\/\//i.test(p.image)||/^data:image\/(jpeg|png|webp);base64,/i.test(p.image))){const img=element("img");img.src=p.image;img.alt=p.title;img.loading="lazy";visual.append(img);}
-    else visual.append(element("span","", "🛍️"));
-    body.append(element("div","category",p.category||"Mercado Livre"),element("h3","",p.title));
-    if(p.pricing_source==="manual"){
-      body.append(element("div","source","Preço e desconto informados pelo afiliado; não verificados pela API."));
-    }else{
-      body.append(element("div","source","Desconto verificado pela API na última consulta."));
-    }
-    body.append(element("div","old",brl(p.original_price)),element("div","price",brl(p.price)));
-    if(p.pricing_source==="manual"&&p.expires_at){body.append(element("div","expiry","Oferta cadastrada até "+new Date(p.expires_at).toLocaleString("pt-BR")+". Confira o preço na loja."));}
-    const buy=element("a","btn","Comprar no Mercado Livre →");
-    buy.href=p.affiliate_url;buy.target="_blank";buy.rel="sponsored noopener noreferrer";
-    body.append(buy);card.append(visual,body);$("cards").append(card);
+    const card=element("article","card");
+    const media=element("div","media");
+    const badge=element("span","discount-badge",
+      Math.floor(Number(p.discount_percent))+"% OFF"+(p.pricing_source==="verified_api"?"":"*"));
+    media.append(badge);
+    if(p.image && (/^https:\/\//i.test(p.image)||/^data:image\/(jpeg|png|webp);base64,/i.test(p.image))){
+      const img=element("img");
+      img.src=p.image;img.alt="Imagem de "+p.title;img.loading="lazy";
+      img.addEventListener("error",()=>{
+        media.replaceChildren(badge,element("span","fallback","🛍️"));
+      },{once:true});
+      media.append(img);
+    }else media.append(element("span","fallback","🛍️"));
+    const info=element("div","info");
+    info.append(element("div","shop",p.merchant||"Mercado Livre"));
+    info.append(element("h3","",p.title));
+    const pricing=element("div","pricing");
+    pricing.append(element("div","old",brl(p.original_price)));
+    pricing.append(element("div","price",brl(p.price)));
+    let source="Desconto verificado na consulta oficial à API.";
+    if(p.pricing_source==="affiliate_feed")source="Preço e desconto informados pela loja no catálogo de afiliados; confirme na loja.";
+    else if(p.pricing_source==="manual")source="Preço e desconto informados manualmente; não verificados automaticamente.";
+    pricing.append(element("div","source",source));
+    const link=element("a","btn","Ver oferta na loja →");
+    link.href=p.affiliate_url;
+    link.target="_blank";link.rel="sponsored noopener noreferrer";
+    pricing.append(link);
+    info.append(pricing);card.append(media,info);$("cards").append(card);
   }
 }
 async function load(){
   try{
-    const res=await fetch("/api/products",{cache:"no-store"});
-    if(!res.ok)throw new Error("Não foi possível buscar as ofertas.");
-    const data=await res.json();
+    const response=await fetch("/api/products",{cache:"no-store"});
+    if(!response.ok)throw new Error("Não foi possível consultar ofertas.");
+    const data=await response.json();
     products=Array.isArray(data.products)?data.products:[];
-    const selected=$("category").value;
+    const oldCat=$("category").value,oldMerchant=$("merchant").value;
     const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort();
+    const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort();
     $("category").replaceChildren(new Option("Todas as categorias",""),...categories.map(c=>new Option(c,c)));
-    if(categories.includes(selected))$("category").value=selected;
-    render();
+    if(categories.includes(oldCat))$("category").value=oldCat;
+    $("merchant").replaceChildren(new Option("Todas as lojas",""),...merchants.map(m=>new Option(m,m)));
+    if(merchants.includes(oldMerchant))$("merchant").value=oldMerchant;
+    renderCategories();render();
   }catch(err){
-    $("count").textContent="Indisponível";
-    $("cards").replaceChildren(element("div","empty","Não foi possível carregar as promoções. Tente atualizar a página em instantes."));
+    $("count").textContent="Temporariamente indisponível";
+    $("categoryGrid").replaceChildren(element("div","category-empty","Não foi possível carregar categorias."));
+    $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente atualizar a página mais tarde."));
   }
 }
 $("search").addEventListener("input",render);
-$("category").addEventListener("change",render);
+$("searchSubmit").addEventListener("click",()=>{
+  render();$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
+});
+$("search").addEventListener("keydown",event=>{
+  if(event.key==="Enter")$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
+});
+$("category").addEventListener("change",()=>{renderCategories();render();});
+$("merchant").addEventListener("change",render);
+$("sort").addEventListener("change",render);
 load();
 </script>
-</body></html>
+</body>
+</html>
