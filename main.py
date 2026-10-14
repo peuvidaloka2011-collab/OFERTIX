@@ -403,8 +403,7 @@ def validate_offer_link(value):
     parsed = urlparse(value)
     path = parsed.path.lower().strip("/")
     if (not path or path.startswith(("afiliados", "social", "busca", "categorias")) or
-        path in ("home", "ofertas", ""))
-        :
+        path in ("home", "ofertas", "")):
         raise ValueError("Cole o link de um produto, nao seu perfil de afiliado nem a pagina inicial.")
     if parsed.hostname in ("meli.la", "www.meli.la") and len(path) < 4:
         raise ValueError("Informe o link meli.la completo do produto.")
@@ -412,6 +411,8 @@ def validate_offer_link(value):
 
 
 def manual_price(value, field):
+    if isinstance(value, bool):
+        raise ValueError(field + " deve ser numerico.")
     try:
         n = float(value)
     except (TypeError, ValueError, OverflowError):
