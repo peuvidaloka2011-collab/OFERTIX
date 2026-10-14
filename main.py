@@ -430,7 +430,62 @@ def import_category(category):
                     deactivate(item_id)
                     failed += 1
 
-        if not ranking:
+        # Fallback documentado: buscar anúncios por categoria quando os produtos
+        # mais vendidos nao fornecem um item MLB diretamente.
+        # Os resultados deste endpoint NAO sao necessariamente os mais vendidos.
+        fallback_attempted = checked == 0
+        fallback_returned = 0
+        fallback_checked = 0
+        fallback_error = None
+        if fallback_attempted:
+            try:
+                search = ml_api("/sites/MLB/search?category=" + category + "&limit=20")
+                listing_rows = search.get("results") if isinstance(search, dict) else None
+                if not isinstance(listing_rows, list):
+                    raise ValueError("Busca de anuncios retornou formato inesperado.")
+                listing_ids = []
+                for row in listing_rows[:20]:
+                    item_id = str(row.get("id", "")).upper() if isinstance(row, dict) else ""
+                    if VALID_ID.fullmatch(item_id) and item_id not in listing_ids:
+                        listing_ids.append(item_id)
+                fallback_returned = len(listing_ids)
+                for item_id in listing_ids:
+                    if item_id in seen_item_ids:
+                        continue
+                    seen_item_ids.add(item_id)
+                    checked += 1
+                    fallback_checked += 1
+                    try:
+                        if verify_and_save(item_id, category):
+                            verified += 1
+                        else:
+                            discarded += 1
+                    except urllib.error.HTTPError as error:
+                        deactivate(item_id)
+                        failed += 1
+                        if len(reasons) < 3:
+                            reasons.append("Preco de anuncio por categoria: HTTP " + str(error.code))
+                    except (urllib.error.URLError, ValueError, KeyError, TypeError, RuntimeError):
+                        deactivate(item_id)
+                        failed += 1
+            except urllib.error.HTTPError as error:
+                fallback_error = "Busca por categoria: HTTP " + str(error.code)
+            except (urllib.error.URLError, ValueError, KeyError, TypeError):
+                fallback_error = "Busca por categoria indisponivel ou com formato inesperado."
+
+        if fallback_checked:
+            message = (
+                "Os produtos do ranking nao forneceram anuncios MLB. A busca oficial "
+                "por categoria retornou anuncios (NAO necessariamente mais vendidos) "
+                "que foram verificados por preco real. Publicacao requer link oficial de afiliado."
+            )
+        elif fallback_attempted:
+            message = (
+                "O ranking nao forneceu anuncios verificaveis. "
+                + (fallback_error or "A busca por categoria tambem nao retornou anuncios MLB acessiveis.")
+                + " Nenhuma promocao foi inventada."
+            )
+        elif not ranking:
             message = "O ranking nao retornou tipos ITEM, PRODUCT ou USER_PRODUCT."
         elif not checked:
             message = (
@@ -462,6 +517,10 @@ def import_category(category):
             "catalog_types_not_supported": catalog_unresolved + catalog_errors,
             "duplicate_items_skipped": repeated,
             "ranking_types": type_counts,
+            "category_search_attempted": fallback_attempted,
+            "category_search_returned": fallback_returned,
+            "category_search_checked": fallback_checked,
+            "category_search_error": fallback_error,
             "diagnostics": reasons,
             "message": message,
         }
