@@ -44,9 +44,32 @@ Na Central de Afiliados, use o Gerador de Links oficial. No painel /admin, assoc
 
 Sem link de afiliado, a promoção fica oculta. Produtos que deixaram de ter desconto também ficam ocultos.
 
+## Autenticar Mercado Livre pelo celular (ambiente de testes)
+
+O app Mercado Livre Developers deve usar Authorization Code, Refresh Token e PKCE com a URI exata:
+https://ofertix-ankt.onrender.com/oauth/callback
+
+No serviço OFERTIX do Render, configure em Environment (sem colocar segredos no GitHub):
+- ML_CLIENT_ID: ID da aplicação
+- ML_CLIENT_SECRET: chave secreta do aplicativo
+- ML_REDIRECT_URI: URL de callback acima
+- OFERTIX_ADMIN_KEY: senha administrativa já configurada
+- OFERTIX_TOKEN_KEY: use o botão Generate do Render para criar um segredo aleatório com pelo menos 32 caracteres. **Mantenha este valor estável** para conseguir descriptografar tokens salvos.
+
+Após publicar a versão OAuth V2, abra https://ofertix-ankt.onrender.com/admin pelo celular:
+1. Entre com OFERTIX_ADMIN_KEY.
+2. Toque em "Preparar autorização".
+3. Toque em "Autorizar Mercado Livre" e confirme a autorização no site oficial.
+4. Volte à aba /admin e toque em "Atualizar painel".
+5. Confira o indicador "OAuth conectado". Se houver erro, copie somente a mensagem, nunca tokens.
+
+O fluxo utiliza state de uso único com validade de 10 minutos, PKCE S256, POST ao endpoint OAuth e criptografia Fernet para os tokens armazenados em SQLite, com uma chave que só está nas variáveis privadas do Render.
+
+**Importante:** enquanto o OFERTIX estiver no Render Free, os tokens e links salvos no SQLite local podem ser perdidos em novos deploys ou reinicializações. Esta configuração serve apenas para testes. A automação de produção depende de banco persistente, armazenamento seguro e execução agendada fora do servidor Free. O OAuth não gera links de afiliado por si só; os links devem ser obtidos por mecanismos oficiais autorizados.
+
 ## Limitações importantes antes de divulgar para clientes
 
-1. Tokens de acesso do Mercado Livre expiram; a renovação OAuth automática ainda não foi implementada.
+1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
 2. No Render Free, o servidor hiberna após 15 minutos sem tráfego: tarefas em segundo plano param.
 3. SQLite é temporário no Render Free; após suspensão/redeploy os links e importações podem desaparecer.
 4. Para funcionamento público contínuo, será necessário banco externo persistente, renovação segura de tokens e execução agendada confiável.
