@@ -124,7 +124,7 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
                     server.shutdown();server.server_close()
                     main.DB=old_db;main.ADMIN_KEY=old_admin
 
-    def test_google_format_publishes_only_real_promotions(self):
+    def test_google_feed_adds_all_carraro_separately_from_promotions(self):
         from affiliate_feeds import parse_google_csv
         import csv
         import io
@@ -148,13 +148,16 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
         parsed=parse_google_csv(buffer.getvalue(),minimum_discount=10)
         self.assertEqual(parsed["scanned"],4)
         self.assertEqual(len(parsed["offers"]),1)
-        self.assertNotIn("partner_products",parsed)
+        self.assertEqual(len(parsed["carraro_products"]),4)
+        self.assertEqual(sum(x["in_stock"] for x in parsed["carraro_products"]),3)
         self.assertEqual(parsed["offers"][0]["discount_percent"],30)
         with patch("scripts.sync_awin_catalog.fetch_awin_feed",return_value=buffer.getvalue()):
             generated,_=generate("https://productdata.awin.com/datafeed/x")
         self.assertEqual(len(generated["products"]),1)
+        self.assertEqual(len(generated["carraro_products"]),4)
         self.assertNotIn("partner_products",generated)
         self.assertEqual(len(pac.read_catalog(generated)),1)
+        self.assertEqual(len(pac.read_carraro_catalog(generated)),4)
 
     def test_google_products_reject_usd_adults_and_no_links(self):
         from affiliate_feeds import parse_google_csv
@@ -180,7 +183,7 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
         self.assertEqual(parsed["offers"],[])
 
 
-    def test_carraro_feed_without_sale_price_produces_empty_catalog(self):
+    def test_carraro_without_discount_still_appears_in_normal_catalog(self):
         from affiliate_feeds import parse_google_csv
         import csv
         import io
@@ -198,12 +201,55 @@ class AwinAutomaticCatalogTests(unittest.TestCase):
         parsed=parse_google_csv(buf.getvalue())
         self.assertEqual(parsed["scanned"],5)
         self.assertEqual(parsed["offers"],[])
+        self.assertEqual(len(parsed["carraro_products"]),5)
         with patch("scripts.sync_awin_catalog.fetch_awin_feed",return_value=buf.getvalue()):
             result,scanned=generate("https://productdata.awin.com/datafeed/download/fid/81383")
         self.assertEqual(scanned,5)
         self.assertEqual(result["products"],[])
+        self.assertEqual(len(result["carraro_products"]),5)
         self.assertNotIn("partner_products",result)
         self.assertEqual(pac.read_catalog(result),[])
+        self.assertEqual(len(pac.read_carraro_catalog(result)),5)
+
+    def test_carraro_public_api_returns_products_without_fake_discounts(self):
+        sample=catalog()
+        sample["products"]=[]
+        sample["carraro_products"]=[
+            {"id":"carraro1","merchant":"Carraro BR","title":"Mesa Carraro dobravel",
+             "category":"Móveis e Casa","price":299.99,
+             "image":"https://cdn.example.org/carraro.jpg",
+             "affiliate_url":"https://www.awin1.com/cread.php?x=123",
+             "in_stock":True},
+            {"id":"carraro2","merchant":"Carraro BR","title":"Mesa Carraro esgotada",
+             "category":"Móveis e Casa","price":199.99,
+             "image":"https://cdn.example.org/carraro2.jpg",
+             "affiliate_url":"https://www.awin1.com/cread.php?x=234",
+             "in_stock":False},
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            old_db=main.DB
+            main.DB=Path(d)/"test.sqlite"
+            main.init_db()
+            with patch.object(pac,"get_carraro_products",
+                              return_value=pac.read_carraro_catalog(sample)):
+                server=main.ThreadingHTTPServer(("127.0.0.1",0),main.Handler)
+                thread=threading.Thread(target=server.serve_forever,daemon=True)
+                thread.start()
+                try:
+                    conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=4)
+                    conn.request("GET","/api/carraro-products")
+                    response=conn.getresponse()
+                    data=json.loads(response.read())
+                    self.assertEqual(response.status,200)
+                    self.assertEqual(data["count"],2)
+                    self.assertTrue(data["products"][0]["in_stock"])
+                    self.assertFalse(data["products"][1]["in_stock"])
+                    self.assertNotIn("discount_percent",data["products"][0])
+                    conn.close()
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    main.DB=old_db
 
     def test_http_failure_returns_expired_cache_as_empty(self):
         pac._CACHE.update(at=0.0,offers=[],expires_at=None)
