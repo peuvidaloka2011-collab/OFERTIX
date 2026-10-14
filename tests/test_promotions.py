@@ -37,6 +37,175 @@ class PromotionsTest(unittest.TestCase):
     def sale(self, current=80, regular=100):
         return {"amount": current, "regular_amount": regular, "currency_id": "BRL"}
 
+    def test_v13_catalog_link_fills_title_photo_but_never_invents_prices(self):
+        link="https://www.mercadolivre.com.br/caixa-de-som-boombox-plus-aiwa/p/MLB38520699?source=affiliate"
+        product={
+            "name":"Caixa de Som Boombox Plus AIWA BBS-01",
+            "pictures":[{"secure_url":"https://http2.mlstatic.com/AIWA-product.webp"}],
+            "category_id":"MLB1000",
+            "price":1,
+            "original_price":9999,
+        }
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",return_value=product) as api:
+                result=main.suggest_offer_fields_from_link(link)
+        api.assert_called_once_with("/products/MLB38520699")
+        self.assertEqual(result["product_id"],"MLB38520699")
+        self.assertEqual(result["title"],product["name"])
+        self.assertEqual(result["title_source"],"api")
+        self.assertEqual(result["image"],product["pictures"][0]["secure_url"])
+        self.assertEqual(result["image_source"],"api")
+        self.assertIsNone(result["price"])
+        self.assertIsNone(result["original_price"])
+        self.assertFalse(result["discount_verified"])
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM manual_offers").fetchone()[0],0)
+
+    def test_v13_catalog_slug_suggests_name_without_oauth_or_price(self):
+        url="https://www.mercadolivre.com.br/caixa-de-som-boombox-plus-aiwa/p/MLB38520699"
+        with patch.object(main,"TOKEN",""):
+            with patch.object(main.oauth_ml,"connected",return_value=False):
+                with patch.object(main,"ml_api") as api:
+                    result=main.suggest_offer_fields_from_link(url)
+        api.assert_not_called()
+        self.assertEqual(result["title"],"caixa de som boombox plus aiwa")
+        self.assertEqual(result["title_source"],"url_sugerido")
+        self.assertIsNone(result["image"])
+        self.assertIsNone(result["price"])
+
+    def test_v13_short_link_to_product_api_catalog_metadata(self):
+        short="https://meli.la/2validShort"
+        url="https://www.mercadolivre.com.br/caixa-de-som-aiwa/p/MLB38520699?ref=tracking"
+        with patch.object(main,"affiliate_redirect_destination",return_value=url) as follow:
+            with patch.object(main.oauth_ml,"connected",return_value=True):
+                with patch.object(main,"ml_api",return_value={
+                    "name":"Caixa AIWA","pictures":[]}) as api:
+                    result=main.suggest_offer_fields_from_link(short)
+        follow.assert_called_once_with(short)
+        api.assert_called_once_with("/products/MLB38520699")
+        self.assertEqual(result["resolved_type"],"catalog")
+
+    def test_v13_short_link_to_social_profile_rejected(self):
+        url="https://meli.la/2imnTQt"
+        with patch.object(main,"affiliate_redirect_destination",
+            return_value="https://www.mercadolivre.com.br/social/mrpedro_201212?matt_tool=123"):
+            with patch.object(main,"ml_api") as api:
+                with self.assertRaisesRegex(ValueError,"perfil social"):
+                    main.suggest_offer_fields_from_link(url)
+        api.assert_not_called()
+
+    def test_v13_item_403_keeps_all_prices_missing(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        link="https://produto.mercadolivre.com.br/MLB-6499468038-caixa-aiwa-_JM"
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=HTTPError(
+                link,403,"Forbidden",{},BytesIO(b'{"access_token":"SHOULD_NOT_LEAK"}'))) as api:
+                result=main.suggest_offer_fields_from_link(link)
+        self.assertEqual(api.call_count,1)
+        self.assertIsNone(result["price"])
+        self.assertIsNone(result["original_price"])
+        self.assertFalse(result["discount_verified"])
+        self.assertIn("HTTP 403",result["messages"][0])
+        self.assertNotIn("SHOULD_NOT_LEAK",json.dumps(result))
+
+    def test_v13_item_metadata_can_succeed_when_sale_price_403(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        item=self.item()
+        item["price"]=1480.0
+        def fake_api(path):
+            if "/sale_price?" in path:
+                raise HTTPError(path,403,"Forbidden",{},BytesIO(b'{}'))
+            return item
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.suggest_offer_fields_from_link(
+                    "https://produto.mercadolivre.com.br/MLB-6499468038-caixa-_JM")
+        self.assertEqual(result["price"],1480.0)
+        self.assertEqual(result["price_source"],"api_anuncio")
+        self.assertIsNone(result["original_price"])
+        self.assertFalse(result["discount_verified"])
+
+    def test_v13_item_uses_official_sale_price_only_for_confirmed_discount(self):
+        item=self.item()
+        item["price"]=90
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=lambda path: self.sale(80,100)
+                if "/sale_price?" in path else item) as api:
+                result=main.suggest_offer_fields_from_link(
+                    "https://produto.mercadolivre.com.br/MLB-6499468038-caixa-_JM")
+        self.assertEqual(api.call_count,2)
+        self.assertEqual(result["price"],80)
+        self.assertEqual(result["original_price"],100)
+        self.assertEqual(result["discount_percent"],20)
+        self.assertEqual(result["price_source"],"api_sale_price")
+        self.assertTrue(result["discount_verified"])
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM manual_offers").fetchone()[0],0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_v13_price_without_minimum_discount_keeps_original_blank(self):
+        item=self.item()
+        item["price"]=100
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=lambda path: self.sale(95,100)
+                if "/sale_price?" in path else item):
+                result=main.suggest_offer_fields_from_link(
+                    "https://produto.mercadolivre.com.br/MLB-6499468038-caixa-_JM")
+        self.assertEqual(result["price"],100)
+        self.assertIsNone(result["original_price"])
+        self.assertFalse(result["discount_verified"])
+
+    def test_v13_rejects_outside_domain_or_fake_image_without_following(self):
+        links=[
+            "http://meli.la/abc1234",
+            "https://mercadolivre.com.br.evil.org/MLB-6499468038-foo",
+            "https://www.mercadolivre.com.br/social/mrpedro_201212",
+            "https://www.mercadolivre.com.br/afiliados/hub",
+        ]
+        for link in links:
+            with self.subTest(link=link):
+                with patch.object(main,"ml_api") as api:
+                    with self.assertRaises(ValueError):
+                        main.suggest_offer_fields_from_link(link)
+                    api.assert_not_called()
+        picture=main.safe_product_image({"pictures":[
+            {"secure_url":"https://attacker.example/x.jpg"},
+            {"secure_url":"https://http2.mlstatic.com/legit.jpg"},
+        ]})
+        self.assertEqual(picture,"https://http2.mlstatic.com/legit.jpg")
+
+    def test_v13_suggestions_endpoint_admin_only_no_persistence(self):
+        server=main.ThreadingHTTPServer(("127.0.0.1",0),main.Handler)
+        thread=threading.Thread(target=server.serve_forever,daemon=True)
+        thread.start()
+        url="https://www.mercadolivre.com.br/caixa-aiwa/p/MLB38520699"
+        body=json.dumps({"affiliate_url":url})
+        try:
+            conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+            conn.request("POST","/api/admin/manual/suggest",body=body,
+                         headers={"Content-Type":"application/json"})
+            response=conn.getresponse()
+            self.assertEqual(response.status,403)
+            response.read();conn.close()
+            with patch.object(main,"TOKEN",""):
+                with patch.object(main.oauth_ml,"connected",return_value=False):
+                    conn=http.client.HTTPConnection("127.0.0.1",server.server_port,timeout=3)
+                    conn.request("POST","/api/admin/manual/suggest",body=body,
+                        headers={"X-Admin-Key":"test-key-only","Content-Type":"application/json"})
+                    response=conn.getresponse()
+                    self.assertEqual(response.status,200)
+                    data=json.loads(response.read())
+                    self.assertEqual(data["product_id"],"MLB38520699")
+                    self.assertIsNone(data["price"])
+                    conn.close()
+            with main.db() as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM manual_offers").fetchone()[0],0)
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def manual_offer(self, **changes):
         data = {
             "title": "Caixa de Som AIWA Boombox Plus",
