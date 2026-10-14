@@ -26,6 +26,9 @@ INTERVAL_HOURS = max(1, min(24, int(os.getenv("OFERTIX_SYNC_HOURS", "6"))))
 CATEGORIES = [c.strip().upper() for c in os.getenv("OFERTIX_CATEGORIES", "").split(",") if re.fullmatch(r"MLB\d+", c.strip().upper())]
 IMPORT_LOCK = threading.Lock()
 LAST_SYNC = {"time": None, "status": "aguardando configuracao", "details": []}
+IMPORT_STATUS_LOCK = threading.Lock()
+IMPORT_STATUS = {"running": False, "category": None, "result": None, "error": None,
+                 "started_at": None, "finished_at": None}
 VALID_ID = re.compile(r"MLB\d+")
 
 
@@ -409,6 +412,32 @@ def import_category(category):
         }
 
 
+def import_in_background(category):
+    """Executa consulta demorada fora da requisicao HTTP. Nunca expoe OAuth."""
+    global IMPORT_STATUS
+    try:
+        result = import_category(category)
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": result, "error": None,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
+    except urllib.error.HTTPError as exc:
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": None,
+                "error": "Mercado Livre respondeu HTTP " + str(exc.code),
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
+    except Exception as exc:
+        with IMPORT_STATUS_LOCK:
+            IMPORT_STATUS = {
+                **IMPORT_STATUS, "running": False, "result": None,
+                "error": "Falha na importacao: " + type(exc).__name__,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+
 def refresh_linked_items():
     """Recheck published items; skip stale/invalid data instead of inventing prices."""
     with IMPORT_LOCK:
@@ -576,6 +605,11 @@ class Handler(BaseHTTPRequestHandler):
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
                 "total": total, "published": published, "last_sync": LAST_SYNC,
             })
+        if path == "/api/admin/import/status":
+            if not self.is_admin():
+                return
+            with IMPORT_STATUS_LOCK:
+                return self.respond(200, dict(IMPORT_STATUS))
         if path == "/api/admin/category":
             if not self.is_admin():
                 return
@@ -626,7 +660,20 @@ class Handler(BaseHTTPRequestHandler):
                 if not TOKEN and not oauth_ml.connected(DB):
                     return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
                 category = str(body.get("category", "")).strip().upper()
-                return self.respond(200, import_category(category))
+                if not re.fullmatch(r"MLB\d+", category):
+                    return self.respond(400, {"error": "Informe um ID de categoria MLB valido."})
+                global IMPORT_STATUS
+                with IMPORT_STATUS_LOCK:
+                    if IMPORT_STATUS["running"]:
+                        return self.respond(409, {"error": "Ja existe importacao em andamento."})
+                    IMPORT_STATUS = {
+                        "running": True, "category": category, "result": None, "error": None,
+                        "started_at": datetime.now(timezone.utc).isoformat(),
+                        "finished_at": None,
+                    }
+                threading.Thread(target=import_in_background, args=(category,),
+                                 daemon=True, name="ofertix-import-manual").start()
+                return self.respond(202, {"started": True, "category": category})
             if path == "/api/admin/refresh":
                 if not TOKEN and not oauth_ml.connected(DB):
                     return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
