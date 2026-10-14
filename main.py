@@ -410,6 +410,205 @@ def validate_offer_link(value):
     return value
 
 
+def resolve_product_link_for_prefill(link):
+    """Resolve URL de afiliado exclusivamente em dominios oficiais HTTPS.
+
+    Links de perfil social, paginas de busca e central de afiliados nao sao
+    produtos, mesmo quando foram criados por uma ferramenta de recomendacoes.
+    """
+    link = validate_offer_link(link)
+    current = link
+    visited = set()
+    for _ in range(6):
+        if not allowed_affiliate_link(current):
+            raise ValueError("O redirecionamento saiu dos dominios oficiais.")
+        if current in visited:
+            raise ValueError("O link entrou em redirecionamento repetido.")
+        visited.add(current)
+        path = urlparse(current).path
+        if re.match(r"^/(social|afiliados|busca|categorias)(?:/|$)", path, re.I):
+            raise ValueError(
+                "O link direciona para perfil social ou area de afiliados, nao para um produto. "
+                "Gere um link individual do produto na Central de Afiliados."
+            )
+        catalog = re.search(r"(?:^|/)p/(MLB\d{6,15})(?=[/_-]|$)", path, re.I)
+        if catalog:
+            slug = path.split("/p/")[0].strip("/").split("/")[-1]
+            return {"kind": "catalog", "id": catalog.group(1).upper(), "url": current,
+                    "slug": slug}
+        item_id = listing_id_from_url(current)
+        if item_id:
+            return {"kind": "item", "id": item_id, "url": current, "slug": ""}
+        if len(visited) > 5:
+            break
+        try:
+            location = affiliate_redirect_destination(current)
+        except ValueError as exc:
+            raise ValueError(
+                "Nao foi possivel abrir o link automaticamente. Tente usar o endereco completo "
+                "de um produto individual e confirme o link de afiliado."
+            ) from None
+        if not location:
+            break
+        current = urljoin(current, location)
+    raise ValueError(
+        "O link nao revelou um produto individual ou catalogo reconhecido. "
+        "Abra o produto no Mercado Livre e cole seu endereco completo."
+    )
+
+
+def safe_product_image(product):
+    """Aceita apenas URLs de imagens do CDN oficial ja usado na V12."""
+    if not isinstance(product, dict):
+        return None
+    choices = [product.get("thumbnail"), product.get("secure_thumbnail")]
+    for candidate in product.get("pictures") or []:
+        if isinstance(candidate, dict):
+            choices.extend([candidate.get("secure_url"), candidate.get("url")])
+    main = product.get("main_picture")
+    if isinstance(main, dict):
+        choices.extend([main.get("secure_url"), main.get("url")])
+    for img in choices:
+        if isinstance(img, str):
+            try:
+                return clean_manual_image(img)
+            except ValueError:
+                continue
+    return None
+
+
+def infer_title_from_catalog_slug(slug):
+    # Aproximacao visual, jamais representar como titulo confirmado pela API.
+    if not isinstance(slug, str) or len(slug) > 160:
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9-]{5,160}", slug):
+        return None
+    text = " ".join(x for x in slug.split("-") if x)
+    return text[:140] if len(text) >= 5 else None
+
+
+def suggest_offer_fields_from_link(link):
+    """Somente leitura. Retorna dados com origem por campo, sem salvar oferta.
+
+    Em 403 nao tenta endpoints alternativos para contornar restricoes.
+    Precos so sao sugeridos quando retornados pela API oficial. Foto e nome de
+    catalogo podem ser consultados independentemente de preco de anuncio.
+    """
+    if not isinstance(link, str) or len(link) > 2048:
+        raise ValueError("Cole um link HTTPS oficial de produto.")
+    resolved = resolve_product_link_for_prefill(link.strip())
+    connected = bool(TOKEN or oauth_ml.connected(DB))
+    info = {
+        "resolved_type": resolved["kind"],
+        "product_id": resolved["id"],
+        "title": None, "title_source": None,
+        "image": None, "image_source": None,
+        "category": None,
+        "price": None, "original_price": None,
+        "discount_percent": None, "price_source": None,
+        "discount_verified": False,
+        "messages": [],
+    }
+    if resolved["kind"] == "catalog":
+        title_guess = infer_title_from_catalog_slug(resolved["slug"])
+        if title_guess:
+            info["title"] = title_guess
+            info["title_source"] = "url_sugerido"
+            info["messages"].append("Titulo sugerido pelo endereco do produto; confira antes de salvar.")
+    if not connected:
+        info["messages"].append(
+            "A API do Mercado Livre nao esta conectada. Preencha a foto e os precos manualmente."
+        )
+        return info
+
+    endpoint = ("/products/" if resolved["kind"] == "catalog" else "/items/") + resolved["id"]
+    try:
+        data = ml_api(endpoint)
+    except urllib.error.HTTPError as exc:
+        info["messages"].append(
+            "Mercado Livre recusou a consulta dos dados do produto (HTTP "
+            + str(exc.code) + "). O restante deve ser revisado manualmente."
+        )
+        return info
+    except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, ValueError):
+        info["messages"].append("Consulta de produto indisponivel. Preencha os dados restantes.")
+        return info
+    if not isinstance(data, dict):
+        info["messages"].append("Resposta de produto em formato inesperado.")
+        return info
+
+    title = data.get("name") if resolved["kind"] == "catalog" else data.get("title")
+    if not title:
+        title = data.get("title")
+    if isinstance(title, str) and 5 <= len(title.strip()) <= 140:
+        info["title"] = title.strip()
+        info["title_source"] = "api"
+    image = safe_product_image(data)
+    if image:
+        info["image"] = image
+        info["image_source"] = "api"
+    category = data.get("category_id")
+    if isinstance(category, str) and re.fullmatch(r"MLB\d+", category):
+        info["category"] = "Mercado Livre"
+    if resolved["kind"] == "catalog":
+        info["messages"].append(
+            "Catalogo encontrado. Nome e imagem vieram da API quando disponiveis. "
+            "O produto de catalogo nao confirma preco nem desconto de um vendedor."
+        )
+        return info
+
+    # /items pode funcionar, enquanto /sale_price falha. Nao confundir preco
+    # normal do anuncio com desconto validado por /sale_price.
+    if data.get("status") != "active":
+        info["messages"].append(
+            "O anuncio nao esta ativo; nenhum preco ou promocao foi sugerido."
+        )
+        return info
+    qty = data.get("available_quantity")
+    if isinstance(qty, (int, float)) and not isinstance(qty, bool) and qty <= 0:
+        info["messages"].append("Anuncio sem estoque; nenhum preco foi sugerido.")
+        return info
+
+    current = positive_amount(data.get("price"))
+    if current is not None and current <= 1000000:
+        info["price"] = round(current, 2)
+        info["price_source"] = "api_anuncio"
+        info["messages"].append(
+            "Preco atual sugerido pela API do anuncio; o desconto ainda nao foi comprovado."
+        )
+    try:
+        sale = ml_api("/items/" + resolved["id"] + "/sale_price?context=channel_marketplace")
+    except urllib.error.HTTPError as exc:
+        info["messages"].append(
+            "Consulta de desconto indisponivel (HTTP " + str(exc.code) +
+            "). Informe preco anterior apenas se puder comprova-lo na pagina do produto."
+        )
+        return info
+    except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, ValueError):
+        info["messages"].append("API de descontos indisponivel; confirme valores manualmente.")
+        return info
+
+    promo = verified_promotion(data, sale)
+    if promo is not None and promo["price"] <= 1000000 and promo["original_price"] <= 1000000:
+        info.update({
+            "price": round(promo["price"], 2),
+            "original_price": round(promo["original_price"], 2),
+            "discount_percent": promo["discount_percent"],
+            "price_source": "api_sale_price",
+            "discount_verified": True,
+        })
+        info["messages"].append(
+            "Preco e desconto confirmados no momento da consulta, mas a oferta "
+            "ainda precisa de confirmacao do link de afiliado antes de ser salva."
+        )
+    else:
+        info["messages"].append(
+            "A API nao confirmou desconto minimo de " + str(PROMO_MIN) +
+            "%. Revise o preco anterior no produto; nenhum desconto foi inventado."
+        )
+    return info
+
+
 def manual_price(value, field):
     if isinstance(value, bool):
         raise ValueError(field + " deve ser numerico.")
@@ -1373,6 +1572,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             body = self.read_body()
+            if path == "/api/admin/manual/suggest":
+                result = suggest_offer_fields_from_link(str(body.get("affiliate_url", "")))
+                return self.respond(200, result)
             if path == "/api/admin/manual/save":
                 return self.respond(200, save_manual_offer(body))
             if path == "/api/admin/manual/activate":
