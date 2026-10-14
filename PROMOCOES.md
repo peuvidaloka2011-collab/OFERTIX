@@ -138,6 +138,20 @@ Depois de selecionar um ID, ele preenche o campo opcional do cadastro de produto
 HTTP 401/403 interrompe a consulta ao recurso bloqueado e mostra uma mensagem, sem acessar outra fonte para burlar a restrição. O aplicativo continua aceitando ID individual manual e segue verificando descontos mínimos de 10% na API antes de exibir ofertas.
 
 Render Free pode hibernar e descartar o banco temporário após deploy, exigindo reautorização OAuth. Evite utilizar a V10 em produção até migrar para armazenamento persistente.
+## V11: diagnosticar separadamente detalhes do anuncio e preco
+
+No painel /admin, a nova area **Diagnostico de anuncio e preco** aceita um ID de anuncio MLB, como MLB6499468038. Com a conta Mercado Livre autorizada, o backend executa duas chamadas **separadas** em modo somente leitura:
+
+- GET /items/{ID} — confirma status active e estoque disponivel, quando a API permite.
+- GET /items/{ID}/sale_price?context=channel_marketplace — obtem amount, regular_amount e moeda, e calcula desconto somente quando ambos os valores reais e a moeda BRL estao presentes.
+
+Cada resultado mostra HTTP 200, HTTP 403/401/404, erro de conexao ou dados insuficientes. Em caso de erro, o diagnostico revela somente codigos normalizados conhecidos como escopos_insuficientes ou acesso_restrito. Nao retorna headers, cookies, tokens OAuth, mensagens brutas do Mercado Livre ou dados do vendedor.
+
+Mesmo que /sale_price responda 200 e indique desconto >=10%, **nao publica** quando /items estiver bloqueado ou nao houver disponibilidade verificada. O diagnostico nunca altera a tabela `products` e nao substitui a validacao e a associacao de link de afiliado oficial na rotina de cadastro.
+
+O Mercado Livre pode retornar HTTP 403 por diversas causas (escopos, usuario, IP, aplicativo, falta de validacoes). Testar a conta real e revisar o detalhe de erro normalizado antes de concluir a causa; nao contornar bloqueios com rotas alternativas.
+
+Antes de uso publico: Render Free usa SQLite efemero e pode perder tokens e links apos deploy/reinicio. Migrar para banco persistente.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
