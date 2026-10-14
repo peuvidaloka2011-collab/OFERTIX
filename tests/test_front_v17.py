@@ -1,4 +1,4 @@
-"""Verificacoes offline da nova seção de catálogo Carraro."""
+"""V17: somente anúncios com desconto comprovável aparecem na vitrine."""
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -12,7 +12,9 @@ HTML=(Path(__file__).resolve().parents[1]/"index.html").read_text(encoding="utf-
 
 class AuditHTML(HTMLParser):
     def __init__(self):
-        super().__init__();self.ids=[];self.fragments=[]
+        super().__init__()
+        self.ids=[]
+        self.fragments=[]
     def handle_starttag(self,tag,attrs):
         a=dict(attrs)
         if "id" in a:self.ids.append(a["id"])
@@ -20,19 +22,20 @@ class AuditHTML(HTMLParser):
             self.fragments.append(a["href"][1:])
 
 
-class PartnerCatalogFrontTests(unittest.TestCase):
-    def test_catalog_section_is_distinct_from_promotions(self):
+class OnlyPromotionFrontTests(unittest.TestCase):
+    def test_show_only_promotions_and_valid_navigation(self):
         doc=AuditHTML();doc.feed(HTML)
         self.assertEqual(len(doc.ids),len(set(doc.ids)))
         for fragment in doc.fragments:
             self.assertIn(fragment,doc.ids)
-        self.assertIn("catalogo-parceiros",doc.ids)
-        self.assertIn("partnerCatalogCount",doc.ids)
-        self.assertIn("partnerCatalogCards",doc.ids)
         self.assertIn("featuredCards",doc.ids)
-        self.assertIn("Desconto não confirmado",HTML)
-        self.assertIn("/api/partner-products",HTML)
-        self.assertIn("makeRegularCard",HTML)
+        self.assertIn("cards",doc.ids)
+        self.assertIn("partnerGrid",doc.ids)
+        self.assertNotIn("catalogo-parceiros",doc.ids)
+        self.assertNotIn("partnerCatalogCards",doc.ids)
+        self.assertNotIn("partnerCatalogCount",doc.ids)
+        self.assertNotIn("/api/partner-products",HTML)
+        self.assertNotIn("makeRegularCard",HTML)
 
     @unittest.skipUnless(shutil.which("node"),"Node.js ausente")
     def test_embedded_javascript_compiles(self):
@@ -45,4 +48,5 @@ class PartnerCatalogFrontTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
 
 
-if __name__=="__main__":unittest.main()
+if __name__=="__main__":
+    unittest.main()
