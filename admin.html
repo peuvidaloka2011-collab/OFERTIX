@@ -45,9 +45,11 @@ a{color:#09683d}#app{display:none}
 <p id="importFeedback" class="feedback" role="status">Escolha uma categoria final. O resultado da importação aparecerá aqui.</p>
 <div id="subcategories" class="child-list" aria-label="Subcategorias encontradas"></div>
 <p class="muted">Para importar categorias automaticamente durante a execução, configure <code>OFERTIX_CATEGORIES</code> no Render, separando os IDs por vírgulas. No Render gratuito, o processo pode hibernar e não executar a tarefa no horário.</p></section>
-<section class="panel"><h2>Associar link de afiliado oficial</h2><p>Gere o URL na Central de Afiliados do Mercado Livre e cole aqui. Um link comum não garante comissão.</p>
-<div class="row"><input id="item" placeholder="ID do produto: MLB123456"><input id="link" type="url" placeholder="https://meli.la/..."><button id="save">Salvar link</button></div>
-<p class="muted">O produto só será visível na vitrine se a promoção continuar válida e o link estiver cadastrado.</p></section>
+<section class="panel"><h2>Cadastrar produto pelo link de afiliado</h2>
+<p>Não precisa importar uma categoria. Primeiro, gere seu link oficial de afiliado para <b>um anúncio específico</b> na Central ou Barra de Afiliados do Mercado Livre. Informe o <b>ID do anúncio MLB</b> (não o código de produto do catálogo) e o link gerado.</p>
+<div class="row"><input id="item" placeholder="ID do anúncio: MLB1234567890" aria-label="ID do anúncio Mercado Livre" autocapitalize="characters"><input id="link" type="url" placeholder="https://meli.la/..." aria-label="Link oficial de afiliado"><button id="save">Salvar e verificar oferta</button></div>
+<p id="linkFeedback" class="feedback" role="status">Ainda não foi cadastrado um anúncio nesta sessão.</p>
+<p class="muted">O OFERTIX consulta o preço pela API. Com desconto confirmado de pelo menos 10%, o anúncio poderá aparecer na vitrine. Se a API negar acesso ou não confirmar promoção, ele fica salvo como pendente ou sem desconto e não é publicado. O sistema não garante rastreamento da comissão apenas pelo domínio do link.</p></section>
 <section class="panel"><h2>Produtos encontrados</h2><div class="table-scroll"><table><thead><tr><th>ID</th><th>Produto</th><th>Desconto</th><th>Status</th><th>Ação</th></tr></thead><tbody id="products"><tr><td colspan="5">Nenhum produto importado.</td></tr></tbody></table></div></section>
 </div>
 </main>
@@ -151,7 +153,7 @@ async function load(){
     const tr=document.createElement("tr");
     function cell(text){const td=document.createElement("td");td.textContent=text;return td;}
     const id=cell(item.id),title=cell(item.title),disc=cell(item.discount_percent?Number(item.discount_percent).toFixed(1)+"%":"—");
-    const status=cell(item.is_promo?(item.affiliate_url?"Com link":"Aguardando link"):"Sem promoção");
+    const status=cell(item.is_promo?(item.affiliate_url?"Promoção com link":"Aguardando link"):(item.affiliate_url&&!item.promo_checked_at?"Aguardando verificação":item.affiliate_url?"Sem desconto confirmado":"Sem promoção"));
     const action=document.createElement("td"),button=document.createElement("button");
     button.textContent="Selecionar";button.className="secondary";button.addEventListener("click",()=>{
       $("item").value=item.id;$("link").value=item.affiliate_url||"";$("item").scrollIntoView({behavior:"smooth",block:"center"});
@@ -207,6 +209,19 @@ $("diagnose").addEventListener("click",async()=>{
   finally{button.disabled=false;}
 });
 $("refresh").addEventListener("click",()=>op("/api/admin/refresh",{},"Revalidação concluída."));
-$("save").addEventListener("click",()=>op("/api/admin/link",{id:$("item").value,affiliate_url:$("link").value},"Link registrado."));
+$("save").addEventListener("click",async()=>{
+  const button=$("save");button.disabled=true;
+  $("linkFeedback").className="feedback";
+  $("linkFeedback").textContent="Salvando link e consultando o preço... Aguarde.";
+  try{
+    const result=await request("/api/admin/link",{method:"POST",body:JSON.stringify({id:$("item").value,affiliate_url:$("link").value})});
+    $("linkFeedback").textContent="Anúncio: "+result.id+"\n"+result.status+"\n"+result.note;
+    $("linkFeedback").className="feedback"+(!result.checked?" error":"");
+    await load();
+  }catch(e){
+    $("linkFeedback").textContent="Não foi possível cadastrar: "+e.message;
+    $("linkFeedback").className="feedback error";
+  }finally{button.disabled=false;}
+});
 $("reload").addEventListener("click",()=>load().catch(e=>info("Erro: "+e.message)));
 </script></body></html>

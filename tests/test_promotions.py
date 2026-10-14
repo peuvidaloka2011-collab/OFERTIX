@@ -332,6 +332,103 @@ class PromotionsTest(unittest.TestCase):
         self.assertFalse(main.allowed_affiliate_link("https://mercadolivre.com.evil.org/abc"))
         self.assertFalse(main.allowed_affiliate_link("http://mercadolivre.com/sec/abc"))
 
+    def test_manual_link_registers_verified_discount_without_category_import(self):
+        calls = []
+        def fake_api(path):
+            calls.append(path)
+            if path == "/items/MLB123456":
+                return self.item()
+            if path == "/items/MLB123456/sale_price?context=channel_marketplace":
+                return self.sale(80, 100)
+            raise AssertionError("Buscas de categoria nao devem acontecer: " + path)
+        with patch.object(main.oauth_ml, "connected", return_value=True):
+            with patch.object(main, "ml_api", side_effect=fake_api):
+                result=main.register_affiliate_item("MLB123456", "https://meli.la/MeuLinkOficial")
+        self.assertTrue(result["checked"])
+        self.assertTrue(result["promotion_confirmed"])
+        self.assertTrue(result["publicly_visible"])
+        self.assertEqual(len(calls), 2)
+        with main.db() as conn:
+            row=conn.execute(
+                "SELECT affiliate_url,is_promo,discount_percent,title FROM products WHERE id=?",
+                ("MLB123456",),
+            ).fetchone()
+        self.assertEqual(row["affiliate_url"], "https://meli.la/MeuLinkOficial")
+        self.assertEqual(row["is_promo"], 1)
+        self.assertEqual(row["discount_percent"], 20.0)
+        self.assertEqual(row["title"], "Fone de ouvido")
+
+    def test_manual_link_saved_as_pending_when_item_access_is_denied(self):
+        from urllib.error import HTTPError
+        def fake_api(path):
+            raise HTTPError("https://api.mercadolibre.com",403,"Forbidden",{},None)
+        with patch.object(main.oauth_ml, "connected", return_value=True):
+            with patch.object(main, "ml_api", side_effect=fake_api):
+                result = main.register_affiliate_item("MLB777777", "https://mercadolivre.com/sec/abc123")
+        self.assertFalse(result["checked"])
+        self.assertFalse(result["publicly_visible"])
+        self.assertIn("HTTP 403", result["status"])
+        with main.db() as conn:
+            row=conn.execute(
+                "SELECT affiliate_url,is_promo,promo_checked_at,price FROM products WHERE id='MLB777777'"
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["is_promo"],0)
+        self.assertIsNone(row["promo_checked_at"])
+        self.assertIsNone(row["price"])
+
+    def test_manual_link_without_discount_never_publishes(self):
+        def fake_api(path):
+            return self.sale(96,100) if "/sale_price" in path else self.item()
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",side_effect=fake_api):
+                result=main.register_affiliate_item("MLB22222","https://meli.la/abc")
+        self.assertTrue(result["checked"])
+        self.assertFalse(result["promotion_confirmed"])
+        with main.db() as conn:
+            row=conn.execute("SELECT is_promo,promo_checked_at FROM products WHERE id='MLB22222'").fetchone()
+        self.assertEqual(row["is_promo"],0)
+        self.assertIsNotNone(row["promo_checked_at"])
+
+    def test_manual_link_can_be_saved_before_oauth_but_is_not_published(self):
+        with patch.object(main.oauth_ml,"connected",return_value=False):
+            result=main.register_affiliate_item("MLB123455","https://meli.la/nome")
+        self.assertFalse(result["checked"])
+        self.assertFalse(result["publicly_visible"])
+        with main.db() as conn:
+            row=conn.execute("SELECT affiliate_url,is_promo FROM products WHERE id='MLB123455'").fetchone()
+        self.assertEqual(row["is_promo"],0)
+        self.assertEqual(row["affiliate_url"],"https://meli.la/nome")
+
+    def test_manual_link_denies_bad_ids_and_untrusted_domains(self):
+        cases=[
+            ("MLBU22222","https://meli.la/ok"),
+            ("MLB123456","https://meli.la.badsite.org/redirect"),
+            ("MLB123456","http://meli.la/no"),
+            ("MLB123456","https://example.org/fake"),
+        ]
+        for item_id, link in cases:
+            with self.subTest(item_id=item_id,link=link):
+                with self.assertRaises(ValueError):
+                    main.register_affiliate_item(item_id,link)
+        with main.db() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],0)
+
+    def test_manual_revalidation_error_hides_previous_confirmed_promotion(self):
+        from urllib.error import HTTPError
+        with patch.object(main.oauth_ml,"connected",return_value=True):
+            with patch.object(main,"ml_api",
+                    side_effect=lambda path:self.sale() if "/sale_price" in path else self.item()):
+                self.assertTrue(main.register_affiliate_item("MLB8888","https://meli.la/valid")["publicly_visible"])
+            with patch.object(main,"ml_api",
+                    side_effect=HTTPError("https://api.mercadolibre.com",403,"Forbidden",{},None)):
+                self.assertFalse(main.register_affiliate_item("MLB8888","https://meli.la/another")["publicly_visible"])
+        with main.db() as conn:
+            row=conn.execute("SELECT is_promo,promo_checked_at,affiliate_url FROM products WHERE id='MLB8888'").fetchone()
+        self.assertEqual(row["is_promo"],0)
+        self.assertIsNone(row["promo_checked_at"])
+        self.assertEqual(row["affiliate_url"],"https://meli.la/another")
+
     def test_offer_not_visible_without_link(self):
         fake = lambda path: self.item() if "/sale_price" not in path else self.sale()
         with patch.object(main, "ml_api", side_effect=fake):
