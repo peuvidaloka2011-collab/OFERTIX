@@ -45,11 +45,15 @@ a{color:#09683d}#app{display:none}
 <p id="importFeedback" class="feedback" role="status">Escolha uma categoria final. O resultado da importação aparecerá aqui.</p>
 <div id="subcategories" class="child-list" aria-label="Subcategorias encontradas"></div>
 <p class="muted">Para importar categorias automaticamente durante a execução, configure <code>OFERTIX_CATEGORIES</code> no Render, separando os IDs por vírgulas. No Render gratuito, o processo pode hibernar e não executar a tarefa no horário.</p></section>
-<section class="panel"><h2>Cadastrar produto pelo link de afiliado</h2>
-<p>Não precisa importar uma categoria. Primeiro, gere seu link oficial de afiliado para <b>um anúncio específico</b> na Central ou Barra de Afiliados do Mercado Livre. Informe o <b>ID do anúncio MLB</b> (não o código de produto do catálogo) e o link gerado.</p>
-<div class="row"><input id="item" placeholder="ID do anúncio: MLB1234567890" aria-label="ID do anúncio Mercado Livre" autocapitalize="characters"><input id="link" type="url" placeholder="https://meli.la/..." aria-label="Link oficial de afiliado"><button id="save">Salvar e verificar oferta</button></div>
-<p id="linkFeedback" class="feedback" role="status">Ainda não foi cadastrado um anúncio nesta sessão.</p>
-<p class="muted">O OFERTIX consulta o preço pela API. Com desconto confirmado de pelo menos 10%, o anúncio poderá aparecer na vitrine. Se a API negar acesso ou não confirmar promoção, ele fica salvo como pendente ou sem desconto e não é publicado. O sistema não garante rastreamento da comissão apenas pelo domínio do link.</p></section>
+<section class="panel"><h2>Cadastrar oferta pelo link de afiliado</h2>
+<p>Gere o link para <b>um produto específico</b> na Central ou Barra de Afiliados do Mercado Livre. Cole somente o link abaixo. O OFERTIX tentará identificar o anúncio automaticamente, sem buscar categorias.</p>
+<div class="row"><input id="link" type="url" placeholder="https://meli.la/..." aria-label="Cole o link oficial de afiliado" autocomplete="url"><button id="save">Identificar e verificar oferta</button></div>
+<details id="advanced" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Opções avançadas — informar ID manualmente</summary>
+<p class="muted">Abra se o link levar a uma página de catálogo ou não contiver um anúncio identificável. Informe o ID de <b>anúncio de vendedor</b>, não o ID de produto de catálogo.</p>
+<input id="item" placeholder="ID do anúncio: MLB1234567890" aria-label="ID do anúncio (opcional)" autocapitalize="characters" style="width:100%">
+</details>
+<p id="linkFeedback" class="feedback" role="status">Cole seu link e toque em Identificar e verificar oferta. Se não for possível localizar o ID, o sistema informará o motivo.</p>
+<p class="muted">Só são publicadas ofertas cuja API confirme um desconto de pelo menos 10%. Caso o link aponte para catálogo, nenhuma publicação será inventada. O domínio do link, sozinho, não comprova a atribuição de comissão.</p></section>
 <section class="panel"><h2>Produtos encontrados</h2><div class="table-scroll"><table><thead><tr><th>ID</th><th>Produto</th><th>Desconto</th><th>Status</th><th>Ação</th></tr></thead><tbody id="products"><tr><td colspan="5">Nenhum produto importado.</td></tr></tbody></table></div></section>
 </div>
 </main>
@@ -156,7 +160,7 @@ async function load(){
     const status=cell(item.is_promo?(item.affiliate_url?"Promoção com link":"Aguardando link"):(item.affiliate_url&&!item.promo_checked_at?"Aguardando verificação":item.affiliate_url?"Sem desconto confirmado":"Sem promoção"));
     const action=document.createElement("td"),button=document.createElement("button");
     button.textContent="Selecionar";button.className="secondary";button.addEventListener("click",()=>{
-      $("item").value=item.id;$("link").value=item.affiliate_url||"";$("item").scrollIntoView({behavior:"smooth",block:"center"});
+      $("advanced").open=true;$("item").value=item.id;$("link").value=item.affiliate_url||"";$("link").scrollIntoView({behavior:"smooth",block:"center"});
     });
     action.append(button);tr.append(id,title,disc,status,action);$("products").append(tr);
   }
@@ -212,14 +216,17 @@ $("refresh").addEventListener("click",()=>op("/api/admin/refresh",{},"Revalidaç
 $("save").addEventListener("click",async()=>{
   const button=$("save");button.disabled=true;
   $("linkFeedback").className="feedback";
-  $("linkFeedback").textContent="Salvando link e consultando o preço... Aguarde.";
+  $("linkFeedback").textContent="Identificando anúncio pelo link e verificando desconto... Aguarde.";
   try{
     const result=await request("/api/admin/link",{method:"POST",body:JSON.stringify({id:$("item").value,affiliate_url:$("link").value})});
-    $("linkFeedback").textContent="Anúncio: "+result.id+"\n"+result.status+"\n"+result.note;
+    $("linkFeedback").textContent="Anúncio identificado: "+result.id+
+      "\nIdentificação: "+(result.detection==="automatico"?"automática pelo link":"ID informado manualmente")+
+      "\n"+result.status+"\n"+result.note;
     $("linkFeedback").className="feedback"+(!result.checked?" error":"");
     await load();
   }catch(e){
-    $("linkFeedback").textContent="Não foi possível cadastrar: "+e.message;
+    $("linkFeedback").textContent="Não foi possível cadastrar: "+e.message+
+      "\nSe o link não identificar um anúncio individual, abra Opções avançadas e informe o ID manualmente.";
     $("linkFeedback").className="feedback error";
   }finally{button.disabled=false;}
 });
