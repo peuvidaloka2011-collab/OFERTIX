@@ -81,6 +81,17 @@ Apenas itens ativos com reducao confirmada de >= 10% no endpoint sale_price sao 
 
 A importacao continua limitada a ate 20 entradas do ranking, e pode demorar ou sofrer limitacao de requisicoes. Render Free pode desligar e perder banco SQLite e tokens; antes de uso publico e necessaria base persistente.
 
+## V5: produtos-pai e IDs MLBU no ranking
+
+A documentacao de /highlights inclui type=ITEM com id=MLBU. Nesta versao, IDs MLBU sao resolvidos pelo User Product e pela busca dos itens do vendedor.
+Para type=PRODUCT, produtos-pai podem nao ter buy_box_winner, mas ter children_ids ou variantes em pickers.products. A V5 consulta no maximo 7 paginas de produto por entrada e 2 anuncios reais; sempre consulta o preco de um anuncio com ID MLB.
+
+A importacao manual agora roda em segundo plano no servidor. O painel consulta /api/admin/import/status com autenticacao a cada 3 segundos (ate 6 minutos). O resultado mostra tipos de ranking, IDs MLBU, anuncios analisados e itens sem anuncios acessiveis.
+
+Limites: o Mercado Livre pode nao fornecer um anuncio compravel ou negar acesso a alguns recursos. O OFERTIX nao deve publicar anuncios sem link oficial de afiliado nem descontos nao verificados.
+
+Render Free pode apagar o banco SQLite e a autorizacao OAuth em novos deploys. Para uso publico: adicionar banco persistente e agendamento confiavel.
+
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
