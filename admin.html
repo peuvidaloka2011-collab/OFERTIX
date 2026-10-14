@@ -48,6 +48,11 @@ a{color:#09683d}#app{display:none}
 <section class="panel"><h2>Cadastrar oferta pelo link de afiliado</h2>
 <p>Gere o link para <b>um produto específico</b> na Central ou Barra de Afiliados do Mercado Livre. Cole somente o link abaixo. O OFERTIX tentará identificar o anúncio automaticamente, sem buscar categorias.</p>
 <div class="row"><input id="link" type="url" placeholder="https://meli.la/..." aria-label="Cole o link oficial de afiliado" autocomplete="url"><button id="save">Identificar e verificar oferta</button></div>
+<div class="row" style="margin-top:10px">
+  <button id="lookupCatalog" class="secondary" type="button">Encontrar anúncios do catálogo</button>
+</div>
+<p class="muted">Use esta opção se o link abrir uma página de catálogo sem ID de anúncio de vendedor.</p>
+<div id="catalogCandidates" aria-live="polite"></div>
 <details id="advanced" style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Opções avançadas — informar ID manualmente</summary>
 <p class="muted">Abra se o link levar a uma página de catálogo ou não contiver um anúncio identificável. Informe o ID de <b>anúncio de vendedor</b>, não o ID de produto de catálogo.</p>
 <input id="item" placeholder="ID do anúncio: MLB1234567890" aria-label="ID do anúncio (opcional)" autocapitalize="characters" style="width:100%">
@@ -213,6 +218,46 @@ $("diagnose").addEventListener("click",async()=>{
   finally{button.disabled=false;}
 });
 $("refresh").addEventListener("click",()=>op("/api/admin/refresh",{},"Revalidação concluída."));
+$("lookupCatalog").addEventListener("click",async()=>{
+  const button=$("lookupCatalog"),target=$("catalogCandidates");
+  button.disabled=true;target.replaceChildren();
+  $("linkFeedback").className="feedback";
+  $("linkFeedback").textContent="Buscando IDs de anúncios associados ao catálogo na API oficial... Aguarde.";
+  try{
+    const data=await request("/api/admin/catalog/candidates",{
+      method:"POST",body:JSON.stringify({affiliate_url:$("link").value.trim()})
+    });
+    $("linkFeedback").textContent="Produto de catálogo: "+data.catalog_id+"\n"+data.message;
+    $("linkFeedback").className="feedback"+(data.restricted?" error":"");
+    const list=Array.isArray(data.candidates)?data.candidates:[];
+    if(list.length){
+      const intro=document.createElement("p");intro.className="muted";
+      intro.textContent="Escolha um anúncio encontrado abaixo. A consulta não valida preço nem garante que o link de afiliado do catálogo gere comissão para esse vendedor.";
+      target.append(intro);
+    }
+    for(const offer of list){
+      const div=document.createElement("div");
+      div.className="feedback";
+      const label=document.createElement("p");
+      label.textContent=offer.id+" — "+offer.source+" (preço ainda não confirmado)";
+      const select=document.createElement("button");
+      select.type="button";select.textContent="Selecionar ID "+offer.id;
+      select.addEventListener("click",()=>{
+        $("advanced").open=true;
+        $("item").value=offer.id;
+        $("linkFeedback").className="feedback";
+        $("linkFeedback").textContent="ID selecionado: "+offer.id+
+          "\nAntes de salvar, confirme na Central de Afiliados que o link corresponde ao anúncio selecionado. Se necessário, gere um novo link para esse anúncio.";
+        $("link").scrollIntoView({behavior:"smooth",block:"center"});
+      });
+      div.append(label,select);target.append(div);
+    }
+  }catch(e){
+    $("linkFeedback").textContent="Não foi possível localizar anúncios do catálogo: "+e.message+
+      "\nA API pode restringir o acesso. Não será criada uma oferta sem verificação.";
+    $("linkFeedback").className="feedback error";
+  }finally{button.disabled=false;}
+});
 $("save").addEventListener("click",async()=>{
   const button=$("save");button.disabled=true;
   $("linkFeedback").className="feedback";
@@ -226,7 +271,7 @@ $("save").addEventListener("click",async()=>{
     await load();
   }catch(e){
     $("linkFeedback").textContent="Não foi possível cadastrar: "+e.message+
-      "\nSe o link não identificar um anúncio individual, abra Opções avançadas e informe o ID manualmente.";
+      "\nSe o link abrir um catálogo, toque em Encontrar anúncios do catálogo. Se a consulta estiver bloqueada, use Opções avançadas.";
     $("linkFeedback").className="feedback error";
   }finally{button.disabled=false;}
 });
