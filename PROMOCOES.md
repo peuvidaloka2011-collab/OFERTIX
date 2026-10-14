@@ -127,6 +127,17 @@ Se o encurtador levar apenas ao catalogo, esconder o ID ou bloquear o acesso (40
 Detectar um ID não garante que o link gere comissao, nem garante que o item tenha oferta valida. A V9 ainda verifica o desconto mínimo por /items/ID e /sale_price; se falhar, fica pendente e fora da vitrine.
 
 **Limite operacional:** Shortlinks `meli.la` variam em comportamento; a capacidade de extrair o ID deve ser validada com um link oficial real. Com Render Free, o SQLite e as autorizacoes podem se perder em novos deploys, portanto esta etapa e para testes, nao para producao.
+## V10: localizar anuncios vinculados ao catalogo por link
+
+O botão **Encontrar anúncios do catálogo** fica no painel mobile ao lado do cadastro por link. Ele aceita links HTTPS de dominios oficiais do Mercado Livre, incluindo meli.la, seguindo no maximo cinco redirecionamentos controlados para chegar a uma pagina /p/MLB... (o código do produto de catálogo). Não faz scraping do site.
+
+O backend consulta o detalhe de /products/{catalog_id} e, quando permitido, lista IDs de anuncios via /products/{product_id}/items, consultando o produto original e até duas variantes conhecidas, no máximo cinco IDs. Os IDs candidatos são exibidos no painel para seleção; **a V10 não verifica o preço, desconto nem publica automaticamente nessa etapa**.
+
+Depois de selecionar um ID, ele preenche o campo opcional do cadastro de produto. O usuário deve conferir que o link de afiliado oficial corresponde ao vendedor e anúncio selecionados, preferencialmente gerando novo link direto para este anúncio. Ter um link de catálogo ou um ID válido não garante comissão.
+
+HTTP 401/403 interrompe a consulta ao recurso bloqueado e mostra uma mensagem, sem acessar outra fonte para burlar a restrição. O aplicativo continua aceitando ID individual manual e segue verificando descontos mínimos de 10% na API antes de exibir ofertas.
+
+Render Free pode hibernar e descartar o banco temporário após deploy, exigindo reautorização OAuth. Evite utilizar a V10 em produção até migrar para armazenamento persistente.
 ## Limitações importantes antes de divulgar para clientes
 
 1. A renovação OAuth foi implementada, mas só será confiável após mover o banco de tokens para armazenamento persistente; no Render Free o SQLite é temporário.
