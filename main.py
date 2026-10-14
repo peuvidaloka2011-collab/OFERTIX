@@ -296,6 +296,61 @@ def ranked_item_candidates(entry):
     return []
 
 
+def diagnose_catalog(category, limit=3):
+    """Leitura de amostra do ranking: apenas informacoes estruturais e nao sensiveis.
+
+    Nao publica produtos e nao expoe URL de autorizacao, tokens ou dados pessoais.
+    """
+    details = category_details(category)
+    if not details["is_final"]:
+        return {"category": category, "is_final": False,
+                "message": "Escolha uma categoria final para diagnosticar."}
+    ranking = ml_api("/highlights/MLB/category/" + category)
+    if not isinstance(ranking, dict) or not isinstance(ranking.get("content"), list):
+        raise ValueError("Ranking nao retornou dados validos.")
+    sample = []
+    for entry in ranking["content"]:
+        if len(sample) >= limit:
+            break
+        if not isinstance(entry, dict) or entry.get("type") != "PRODUCT":
+            continue
+        product_id = str(entry.get("id", "")).upper()
+        if not VALID_ID.fullmatch(product_id):
+            continue
+        try:
+            obj = ml_api("/products/" + product_id)
+            if not isinstance(obj, dict):
+                sample.append({"product_id": product_id, "error": "Formato nao reconhecido."})
+                continue
+            winner = obj.get("buy_box_winner")
+            winner_id = str(winner.get("item_id", "")).upper() if isinstance(winner, dict) else ""
+            children = obj.get("children_ids") or []
+            pickers = obj.get("pickers") or []
+            pickers_count = sum(
+                len(p.get("products") or []) for p in pickers if isinstance(p, dict)
+            )
+            sample.append({
+                "product_id": product_id,
+                "status": obj.get("status", "desconhecido"),
+                "buy_box_winner_has_item_id": bool(VALID_ID.fullmatch(winner_id)),
+                "has_parent_id": bool(obj.get("parent_id")),
+                "children_count": len(children) if isinstance(children, list) else 0,
+                "picker_options_count": pickers_count,
+                "type": obj.get("type", "nao informado"),
+            })
+        except urllib.error.HTTPError as exc:
+            sample.append({"product_id": product_id, "error": "HTTP " + str(exc.code)})
+        except (urllib.error.URLError, TypeError, ValueError, KeyError):
+            sample.append({"product_id": product_id, "error": "Consulta nao concluida."})
+    return {
+        "category": category,
+        "ranking_count": len(ranking["content"]),
+        "sample_size": len(sample),
+        "sample": sample,
+        "note": "Diagnostico somente leitura. IDs sao publicos; nao compartilhe credenciais.",
+    }
+
+
 def import_category(category):
     category = str(category).upper().strip()
     details = category_details(category)
@@ -605,6 +660,21 @@ class Handler(BaseHTTPRequestHandler):
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
                 "total": total, "published": published, "last_sync": LAST_SYNC,
             })
+        if path == "/api/admin/catalog/diagnose":
+            if not self.is_admin():
+                return
+            query = parse_qs(urlparse(self.path).query)
+            category = query.get("category", [""])[0].strip().upper()
+            if not re.fullmatch(r"MLB\d+", category):
+                return self.respond(400, {"error": "Categoria MLB invalida."})
+            try:
+                return self.respond(200, diagnose_catalog(category))
+            except ValueError as exc:
+                return self.respond(400, {"error": str(exc)})
+            except urllib.error.HTTPError as exc:
+                return self.respond(502, {"error": "Mercado Livre respondeu HTTP " + str(exc.code)})
+            except Exception as exc:
+                return self.respond(502, {"error": "Diagnostico indisponivel: " + type(exc).__name__})
         if path == "/api/admin/import/status":
             if not self.is_admin():
                 return
