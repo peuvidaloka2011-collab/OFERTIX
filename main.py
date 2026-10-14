@@ -12,7 +12,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
+import html
+import oauth_ml
 
 BASE = Path(__file__).resolve().parent
 DB = Path(os.getenv("OFERTIX_DB_PATH", str(BASE / "ofertix.db")))
@@ -62,14 +64,22 @@ def init_db():
         }.items():
             if name not in columns:
                 conn.execute("ALTER TABLE products ADD COLUMN " + name + " " + definition)
+    oauth_ml.init(DB)
+
+
+def current_token():
+    if oauth_ml.connected(DB):
+        return oauth_ml.access_token(DB)
+    return TOKEN
 
 
 def ml_api(path):
-    if not TOKEN:
-        raise RuntimeError("ML_ACCESS_TOKEN nao configurado; configure OAuth antes de importar.")
+    token = current_token()
+    if not token:
+        raise RuntimeError("Autorize o Mercado Livre no painel ou configure token temporario.")
     req = urllib.request.Request(
         "https://api.mercadolibre.com" + path,
-        headers={"Authorization": "Bearer " + TOKEN, "Accept": "application/json", "User-Agent": "OFERTIX/2.0"},
+        headers={"Authorization": "Bearer " + token, "Accept": "application/json", "User-Agent": "OFERTIX/2.0"},
     )
     with urllib.request.urlopen(req, timeout=20) as response:
         return json.load(response)
@@ -219,8 +229,8 @@ def refresh_linked_items():
 
 def run_sync():
     global LAST_SYNC
-    if not TOKEN:
-        LAST_SYNC = {"time": None, "status": "sem token OAuth", "details": []}
+    if not TOKEN and not oauth_ml.connected(DB):
+        LAST_SYNC = {"time": None, "status": "sem autorizacao OAuth", "details": []}
         return
     details = []
     for category in CATEGORIES:
@@ -271,6 +281,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def oauth_page(self, status, title, message):
+        # Nunca devolva o code, state ou tokens ao navegador.
+        page = ('<!doctype html><html lang="pt-BR"><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                '<title>OFERTIX - autorizacao</title>'
+                '<body style="font:16px system-ui;background:#f3f8f4;color:#16452e;padding:30px">'
+                '<h2>' + html.escape(title) + '</h2><p>' + html.escape(message) + '</p>'
+                '<a href="/admin">Abrir painel OFERTIX</a></body></html>')
+        payload = page.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def is_admin(self):
         if not ADMIN_KEY:
             self.respond(503, {"error": "Configure OFERTIX_ADMIN_KEY no Render ou no terminal."})
@@ -294,6 +321,22 @@ class Handler(BaseHTTPRequestHandler):
             return self.html("admin.html")
         if path == "/api/health":
             return self.respond(200, {"ok": True, "service": "OFERTIX"})
+        if path == "/oauth/callback":
+            params = parse_qs(urlparse(self.path).query)
+            if params.get("error"):
+                return self.oauth_page(400, "Autorizacao negada", "O Mercado Livre nao autorizou o acesso.")
+            try:
+                code = params.get("code", [""])[0]
+                state = params.get("state", [""])[0]
+                oauth_ml.exchange(DB, state, code)
+            except (oauth_ml.OAuthFlowError, oauth_ml.OAuthConfigError) as exc:
+                return self.oauth_page(400, "Nao foi possivel conectar", str(exc))
+            except Exception:
+                return self.oauth_page(502, "Erro na conexao", "Tente novamente pelo painel.")
+            if CATEGORIES:
+                threading.Thread(target=run_sync, name="ofertix-after-oauth", daemon=True).start()
+            return self.oauth_page(200, "Mercado Livre conectado!",
+                                   "Volte para a aba do painel OFERTIX e toque em Atualizar painel.")
         if path == "/api/products":
             with db() as conn:
                 rows = [
@@ -321,7 +364,9 @@ class Handler(BaseHTTPRequestHandler):
                     (PROMO_MIN, "-" + str(FRESH_HOURS) + " hours"),
                 ).fetchone()[0]
             return self.respond(200, {
-                "token_configured": bool(TOKEN), "categories": CATEGORIES, "min_discount": PROMO_MIN,
+                "token_configured": bool(TOKEN or oauth_ml.connected(DB)),
+                "oauth_ready": oauth_ml.ready(), "oauth_connected": oauth_ml.connected(DB),
+                "categories": CATEGORIES, "min_discount": PROMO_MIN,
                 "refresh_every_hours": INTERVAL_HOURS, "max_age_hours": FRESH_HOURS,
                 "total": total, "published": published, "last_sync": LAST_SYNC,
             })
@@ -343,6 +388,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlparse(self.path).path
             body = self.read_body()
+            if path == "/api/admin/oauth/start":
+                return self.respond(200, {"authorization_url": oauth_ml.start(DB)})
             if path == "/api/admin/link":
                 item_id = str(body.get("id", "")).strip().upper()
                 link = str(body.get("affiliate_url", "")).strip()
@@ -357,15 +404,19 @@ class Handler(BaseHTTPRequestHandler):
                         return self.respond(404, {"error": "Importe primeiro o produto pelo ID da categoria."})
                 return self.respond(200, {"ok": True, "note": "Verifique no Gerador de Links do Mercado Livre se o URL informado realmente tem rastreio de afiliado."})
             if path == "/api/admin/import":
-                if not TOKEN:
-                    return self.respond(400, {"error": "Configure ML_ACCESS_TOKEN antes de importar produtos."})
+                if not TOKEN and not oauth_ml.connected(DB):
+                    return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
                 category = str(body.get("category", "")).strip().upper()
                 return self.respond(200, import_category(category))
             if path == "/api/admin/refresh":
-                if not TOKEN:
-                    return self.respond(400, {"error": "ML_ACCESS_TOKEN nao configurado."})
+                if not TOKEN and not oauth_ml.connected(DB):
+                    return self.respond(400, {"error": "Conecte sua conta Mercado Livre pelo painel."})
                 return self.respond(200, refresh_linked_items())
             return self.respond(404, {"error": "Rota administrativa inexistente."})
+        except oauth_ml.OAuthConfigError as exc:
+            return self.respond(400, {"error": str(exc)})
+        except oauth_ml.OAuthFlowError as exc:
+            return self.respond(502, {"error": str(exc)})
         except (ValueError, json.JSONDecodeError) as exc:
             return self.respond(400, {"error": str(exc)})
         except urllib.error.HTTPError as exc:
@@ -374,7 +425,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(500, {"error": "Falha na operacao: " + type(exc).__name__})
 
     def log_message(self, format_string, *args):
-        super().log_message(format_string, *args)
+        # A URL de retorno contem um codigo OAuth e nao pode entrar nos logs.
+        print("HTTP", self.command, urlparse(self.path).path, flush=True)
 
 
 if __name__ == "__main__":
@@ -383,7 +435,7 @@ if __name__ == "__main__":
     print("OFERTIX: porta " + str(port), flush=True)
     if not ADMIN_KEY:
         print("AVISO: OFERTIX_ADMIN_KEY nao foi configurada.", flush=True)
-    if not TOKEN:
-        print("AVISO: ML_ACCESS_TOKEN ausente. Importacao aguarda OAuth.", flush=True)
+    if not TOKEN and not oauth_ml.connected(DB):
+        print("AVISO: Mercado Livre aguarda autorizacao OAuth pelo painel.", flush=True)
     threading.Thread(target=background_job, name="ofertix-sync", daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
