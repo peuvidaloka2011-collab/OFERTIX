@@ -300,6 +300,15 @@ main{padding-top:12px}
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 
+
+.standard-section{margin-top:28px}
+.standard-heading{background:#fff;border-bottom-color:#287c5a;border-radius:9px 9px 0 0}
+.standard-heading h2{color:#267450}
+.standard-summary{font-size:12px;color:#646b71;background:#fff;margin:0;padding:12px 16px;border-bottom:1px solid #f1f2f3}
+.standard-product .source{background:#eef8f2;border:1px solid #dbeee2;color:#335a45}
+.standard-product .price{color:#263c34}
+.standard-product .media{background:#fff}
+@media(max-width:650px){.standard-summary{padding:10px 12px}}
 </style>
 </head>
 <body>
@@ -328,6 +337,7 @@ main{padding-top:12px}
     <a href="#categorias">☰ &nbsp; Todas as categorias</a>
     <a href="#ofertas-do-dia">🔥 &nbsp; Ofertas do dia</a>
     <a href="#ofertas">🏷️ &nbsp; Promoções</a>
+    <a href="#catalogo-parceiros">🛍️ &nbsp; Catálogo de parceiros</a>
     <a href="#lojas">🏬 &nbsp; Lojas parceiras</a>
     <a href="#transparencia">❔ &nbsp; Como funciona</a>
   </div>
@@ -406,6 +416,14 @@ main{padding-top:12px}
     </div>
     <div id="cards" class="cards" aria-live="polite"></div>
   </section>
+  <section id="catalogo-parceiros" class="standard-section" aria-labelledby="catalogo-title">
+    <div class="deals-heading standard-heading">
+      <h2 id="catalogo-title">PRODUTOS DE LOJAS PARCEIRAS</h2>
+      <span>Produtos com preço informado pela loja — desconto não confirmado</span>
+    </div>
+    <p id="partnerCatalogCount" class="standard-summary">Carregando produtos de lojas parceiras…</p>
+    <div id="partnerCatalogCards" class="cards" aria-live="polite"></div>
+  </section>
   <section id="transparencia" class="disclosure">
     <strong>Publicidade e transparência:</strong> o OFERTIX divulga produtos por links de afiliados e pode receber comissões por compras elegíveis. Os preços podem vir de feeds fornecidos pelas lojas, de consultas oficiais à API ou de cadastro manual; a origem aparece em cada produto. Valores anteriores e percentuais são informações disponibilizadas pela fonte, não garantias de menor preço histórico. Um asterisco (*) indica desconto não verificado automaticamente pela API de preços. Confira sempre preço, frete, estoque e condições diretamente no site da loja antes de comprar.
   </section>
@@ -443,6 +461,7 @@ const categoryGroups=[
  {key:"moda",name:"Moda",icon:"👕",terms:["moda","roupa","vestido","sapato","calcado","camiseta"]}
 ];
 let products=[];
+let regularProducts=[];
 let selectedGroup="";
 function safeAffiliateURL(url){
   try{
@@ -484,7 +503,7 @@ function renderCategories(){
 }
 function renderPartners(){
   const grid=$("partnerGrid");grid.replaceChildren();
-  const names=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  const names=[...new Set([...products,...regularProducts].map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
   if(!names.length){
     grid.append(element("div","partner-empty","Novas lojas aparecerão aqui quando houver ofertas disponíveis e links de afiliado autorizados."));
     return;
@@ -494,7 +513,7 @@ function renderPartners(){
     card.type="button";
     const logo=element("span","partner-mark",name.slice(0,1).toUpperCase());
     const info=element("span","partner-text");
-    info.append(element("span","partner-name",name),element("small","",products.filter(p=>(p.merchant||"Mercado Livre")===name).length+" oferta(s)"));
+    info.append(element("span","partner-name",name),element("small","",[...products,...regularProducts].filter(p=>(p.merchant||"Mercado Livre")===name).length+" produto(s)"));
     card.append(logo,info);
     card.addEventListener("click",()=>{
       $("merchant").value=name;selectedGroup="";
@@ -543,6 +562,49 @@ function renderFeatured(){
   }
   for(const p of list)grid.append(makeProductCard(p));
 }
+
+function makeRegularCard(p){
+  const card=element("article","card standard-product");
+  const media=element("div","media");
+  if(typeof p.image==="string"&&/^https:\/\//.test(p.image)){
+    const img=element("img");img.src=p.image;img.alt="Foto de "+p.title;img.loading="lazy";
+    img.addEventListener("error",()=>media.replaceChildren(element("span","fallback","🛍️")),{once:true});
+    media.append(img);
+  }else media.append(element("span","fallback","🛍️"));
+  const info=element("div","info");
+  info.append(element("div","shop",p.merchant||"Loja parceira"),element("h3","",p.title));
+  const pricing=element("div","pricing");
+  pricing.append(element("div","price",brl(p.price)));
+  pricing.append(element("div","source","Preço informado pela loja. Desconto não confirmado. Confira no site antes de comprar."));
+  const buy=element("a","btn","Ver produto na loja →");
+  buy.href=p.affiliate_url;buy.target="_blank";buy.rel="sponsored noopener noreferrer";
+  pricing.append(buy);info.append(pricing);card.append(media,info);
+  return card;
+}
+function renderPartnerCatalog(){
+  const box=$("partnerCatalogCards");
+  const query=normalize($("search").value.trim());
+  const category=$("category").value;
+  const merchant=$("merchant").value;
+  const sort=$("sort").value;
+  const filtered=regularProducts.filter(p=>
+    normalize((p.title||"")+" "+(p.merchant||"")+" "+(p.category||"")).includes(query)&&
+    (!category||p.category===category)&&
+    (!merchant||p.merchant===merchant)&&belongsToGroup(p,selectedGroup));
+  filtered.sort((a,b)=>{
+    if(sort==="low")return a.price-b.price;
+    if(sort==="high")return b.price-a.price;
+    return String(a.title).localeCompare(String(b.title),"pt-BR");
+  });
+  $("partnerCatalogCount").textContent=filtered.length+
+    " produto(s) sem desconto confirmado · Exibindo até 60 por pesquisa. Compre diretamente na loja.";
+  box.replaceChildren();
+  for(const p of filtered.slice(0,60))box.append(makeRegularCard(p));
+  if(!filtered.length){
+    box.append(element("div","empty",regularProducts.length?
+      "Nenhum produto do catálogo corresponde à pesquisa.":"Ainda não há produtos de lojas parceiras disponíveis."));
+  }
+}
 function render(){
   const query=normalize($("search").value.trim());
   const category=$("category").value;
@@ -568,6 +630,7 @@ function render(){
     return;
   }
   for(const p of filtered)grid.append(makeProductCard(p));
+  renderPartnerCatalog();
 }
 async function load(){
   try{
@@ -575,9 +638,18 @@ async function load(){
     if(!response.ok)throw new Error("Não foi possível consultar ofertas.");
     const data=await response.json();
     products=(Array.isArray(data.products)?data.products:[]).filter(canDisplay);
+    try{
+      const partnersResponse=await fetch("/api/partner-products",{cache:"no-store"});
+      if(partnersResponse.ok){
+        const partners=await partnersResponse.json();
+        regularProducts=(Array.isArray(partners.products)?partners.products:[]).filter(p=>
+          p&&typeof p.title==="string"&&Number.isFinite(Number(p.price))&&Number(p.price)>0&&
+          /^https:\/\//.test(p.affiliate_url||"")&&/^https:\/\//.test(p.image||""));
+      }
+    }catch(_){regularProducts=[];}
     const oldCategory=$("category").value,oldMerchant=$("merchant").value;
-    const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
-    const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const categories=[...new Set([...products,...regularProducts].map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
+    const merchants=[...new Set([...products,...regularProducts].map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
     $("category").replaceChildren(new Option("Todas as categorias",""),...categories.map(c=>new Option(c,c)));
     if(categories.includes(oldCategory))$("category").value=oldCategory;
     $("merchant").replaceChildren(new Option("Todas as lojas",""),...merchants.map(m=>new Option(m,m)));
@@ -589,6 +661,8 @@ async function load(){
     $("partnerGrid").replaceChildren(element("div","partner-empty","Não foi possível carregar as lojas parceiras."));
     $("featuredCards").replaceChildren(element("div","empty","As ofertas estão temporariamente indisponíveis."));
     $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente novamente mais tarde."));
+    $("partnerCatalogCount").textContent="Catálogo temporariamente indisponível.";
+    $("partnerCatalogCards").replaceChildren(element("div","empty","Não foi possível carregar os produtos das lojas parceiras."));
   }
 }
 $("search").addEventListener("input",render);
