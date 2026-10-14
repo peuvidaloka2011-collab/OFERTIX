@@ -266,7 +266,7 @@ def _google_price(raw):
 def parse_google_csv(text, minimum_discount=10):
     """Converte feeds Awin no esquema Google Merchant.
 
-    Sem sale_price: produto normal, jamais rotulado como promoção.
+    Sem sale_price: ignora o produto, pois nao ha promocao comprovavel.
     Preço em BRL, estoque real, imagem HTTPS e deep link rastreável obrigatórios.
     """
     if not isinstance(text, str) or not text or len(text.encode("utf-8")) > MAX_CSV_BYTES:
@@ -276,7 +276,7 @@ def parse_google_csv(text, minimum_discount=10):
                 "aw_deep_link", "image_link", "availability"}
     if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
         raise ValueError("Colunas Google Awin obrigatorias ausentes.")
-    discounts, standard = {}, {}
+    discounts = {}
     scanned=0
     for row in reader:
         scanned += 1
@@ -319,12 +319,9 @@ def parse_google_csv(text, minimum_discount=10):
             if percentage >= minimum_discount:
                 discounts[ident]={**item,"original_price":regular_price,
                                   "discount_percent":percentage}
+                if len(discounts)>MAX_OFFERS:
+                    raise ValueError("Feed possui mais promocoes que o limite.")
                 continue
-        # Produto sem desconto confirmado, com preço atual fornecido pelo lojista.
-        standard[ident]=item
-        if len(discounts)+len(standard)>MAX_OFFERS:
-            raise ValueError("Feed possui mais produtos que o limite.")
     if not scanned:
         raise ValueError("Feed Google sem produtos.")
-    return {"scanned":scanned,"offers":list(discounts.values()),
-            "partner_products":list(standard.values())}
+    return {"scanned":scanned,"offers":list(discounts.values())}
