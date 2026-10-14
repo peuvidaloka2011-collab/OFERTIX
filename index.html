@@ -599,6 +599,28 @@ const categoryGroups=[
 ];
 let products=[];
 let selectedGroup="";
+let selectedOfferId=new URLSearchParams(window.location.search).get("oferta")||"";
+function showToast(message){
+  const node=$("siteToast");
+  node.textContent=message;
+  node.hidden=false;
+  window.clearTimeout(showToast.hideTimer);
+  showToast.hideTimer=window.setTimeout(()=>{node.hidden=true;},3200);
+}
+function clearFilters(){
+  selectedOfferId="";
+  $("search").value="";
+  $("category").value="";
+  $("merchant").value="";
+  $("sort").value="discount";
+  const newURL=new URL(window.location.href);
+  newURL.searchParams.delete("oferta");
+  window.history.replaceState(null,"",newURL.href);
+  selectedGroup="";
+  renderCategories();renderPartners();render();
+  $("search").focus();
+}
+
 function safeAffiliateURL(url){
   try{
     const link=new URL(String(url));
@@ -610,6 +632,9 @@ function canDisplay(p){
     Number.isFinite(Number(p.price))&&Number(p.price)>0&&
     Number.isFinite(Number(p.original_price))&&Number(p.original_price)>Number(p.price)&&
     Number.isFinite(Number(p.discount_percent))&&Number(p.discount_percent)>0&&
+    Number(p.discount_percent)<100&&
+    Number.isFinite((Number(p.original_price)-Number(p.price))/Number(p.original_price))&&
+    Math.abs(Number(p.discount_percent)-((Number(p.original_price)-Number(p.price))/Number(p.original_price)*100))<=3&&
     safeAffiliateURL(p.affiliate_url);
 }
 function belongsToGroup(p,key){
@@ -629,6 +654,7 @@ function renderCategories(){
     button.append(element("span","emoji",item.icon),element("span","cat-title",item.name));
     button.addEventListener("click",()=>{
       selectedGroup=item.key;
+      selectedOfferId="";
       $("category").value="";
       renderCategories();
       render();
@@ -652,7 +678,7 @@ function renderPartners(){
     info.append(element("span","partner-name",name),element("small","",products.filter(p=>(p.merchant||"Mercado Livre")===name).length+" oferta(s)"));
     card.append(logo,info);
     card.addEventListener("click",()=>{
-      $("merchant").value=name;selectedGroup="";
+      $("merchant").value=name;selectedGroup="";selectedOfferId="";
       $("category").value="";
       renderCategories();renderPartners();render();
       $("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
@@ -685,7 +711,34 @@ function makeProductCard(p){
   const buy=element("a","btn","Ver oferta →");
   buy.href=safeAffiliateURL(p.affiliate_url);
   buy.target="_blank";buy.rel="sponsored noopener noreferrer";
-  pricing.append(buy);info.append(pricing);card.append(media,info);
+  pricing.append(buy);
+  if(p.id){
+    const share=element("button","share-offer","↗  Compartilhar oferta");
+    share.type="button";
+    share.setAttribute("aria-label","Compartilhar: "+p.title);
+    share.addEventListener("click",async()=>{
+      const link=new URL("/",window.location.origin);
+      link.searchParams.set("oferta",String(p.id));
+      try{
+        if(navigator.share){
+          await navigator.share({title:p.title,text:"Confira esta oferta no OFERTIX",url:link.href});
+          return;
+        }
+        if(!navigator.clipboard||!navigator.clipboard.writeText)throw new Error("copy_unavailable");
+        await navigator.clipboard.writeText(link.href);
+        showToast("Link da oferta copiado!");
+      }catch(error){
+        if(error && error.name==="AbortError")return;
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          try{await navigator.clipboard.writeText(link.href);showToast("Link da oferta copiado!");return;}
+          catch(_){}
+        }
+        window.prompt("Copie este link para compartilhar:",link.href);
+      }
+    });
+    pricing.append(share);
+  }
+  info.append(pricing);card.append(media,info);
   return card;
 }
 function renderFeatured(){
@@ -705,7 +758,7 @@ function render(){
   const sort=$("sort").value;
   const filtered=products.filter(p=>{
     const matches=normalize((p.title||"")+" "+(p.merchant||"Mercado Livre")+" "+(p.category||"")).includes(query);
-    return matches&&(!category||p.category===category)&&(!merchant||(p.merchant||"Mercado Livre")===merchant)&&belongsToGroup(p,selectedGroup);
+    return matches&&(!category||p.category===category)&&(!merchant||(p.merchant||"Mercado Livre")===merchant)&&belongsToGroup(p,selectedGroup)&&(!selectedOfferId||String(p.id)===selectedOfferId);
   });
   filtered.sort((a,b)=>{
     if(sort==="low")return Number(a.price)-Number(b.price);
@@ -714,12 +767,24 @@ function render(){
     return Number(b.discount_percent)-Number(a.discount_percent);
   });
   $("count").textContent=filtered.length+" produto(s)";
+  $("filterFeedback").textContent=filtered.length+" ofertas encontradas após a pesquisa e os filtros.";
   const grid=$("cards");grid.replaceChildren();
   if(!filtered.length){
-    const message=products.length?
-      "Nenhuma oferta encontrada com esses filtros. Experimente outra categoria ou pesquisa.":
-      "Ainda não há ofertas disponíveis com links de afiliado autorizados. Novos produtos aparecerão quando os catálogos forem conectados.";
-    grid.append(element("div","empty",message));
+    const empty=element("div","empty no-results");
+    const icon=element("span","empty-icon",products.length?"🔎":"🏬");
+    icon.setAttribute("aria-hidden","true");
+    const heading=element("strong","empty-heading",
+      selectedOfferId?"Esta oferta não está mais disponível":products.length?"Nenhum produto encontrado":"Estamos preparando novas ofertas");
+    const message=element("span","empty-description",
+      selectedOfferId?"O preço ou o anúncio pode ter mudado. Explore outras promoções disponíveis.":
+      products.length?"Tente outra palavra, categoria ou loja. Os resultados são atualizados conforme os catálogos autorizados.":
+      "Quando as lojas parceiras liberarem os catálogos, suas promoções aparecerão aqui automaticamente. Nenhum preço ou desconto fictício é exibido.");
+    empty.append(icon,heading,message);
+    if(products.length){
+      const clear=element("button","clear-filters","Mostrar todas as ofertas");
+      clear.type="button";clear.addEventListener("click",clearFilters);empty.append(clear);
+    }
+    grid.append(empty);
     return;
   }
   for(const p of filtered)grid.append(makeProductCard(p));
@@ -730,6 +795,11 @@ async function load(){
     if(!response.ok)throw new Error("Não foi possível consultar ofertas.");
     const data=await response.json();
     products=(Array.isArray(data.products)?data.products:[]).filter(canDisplay);
+    const matching=selectedOfferId&&products.find(p=>String(p.id)===selectedOfferId);
+    if(matching){
+      $("search").value=matching.title;
+      window.requestAnimationFrame(()=>{$("ofertas").scrollIntoView({block:"start"});});
+    }
     const oldCategory=$("category").value,oldMerchant=$("merchant").value;
     const categories=[...new Set(products.map(p=>p.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
     const merchants=[...new Set(products.map(p=>p.merchant||"Mercado Livre"))].sort((a,b)=>a.localeCompare(b,"pt-BR"));
@@ -746,18 +816,22 @@ async function load(){
     $("cards").replaceChildren(element("div","empty","Não foi possível carregar as ofertas agora. Tente novamente mais tarde."));
   }
 }
-$("search").addEventListener("input",render);
+$("search").addEventListener("input",()=>{
+  selectedOfferId="";
+  render();
+});
 $("searchSubmit").addEventListener("click",()=>{
+  selectedOfferId="";
   render();$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
 });
 $("search").addEventListener("keydown",event=>{
   if(event.key==="Enter")$("ofertas").scrollIntoView({behavior:"smooth",block:"start"});
 });
 $("category").addEventListener("change",()=>{
-  selectedGroup="";
+  selectedGroup="";selectedOfferId="";
   renderCategories();render();
 });
-$("merchant").addEventListener("change",()=>{renderPartners();render();});
+$("merchant").addEventListener("change",()=>{selectedOfferId="";renderPartners();render();});
 $("sort").addEventListener("change",render);
 load();
 </script>
